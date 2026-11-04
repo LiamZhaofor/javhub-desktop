@@ -181,10 +181,14 @@ class _PlayerPageState extends State<PlayerPage> {
     _tools.toast('${next}x 倍速');
   }
 
-  Widget _controls(VideoState state) {
+  // The context of the controls themselves (not state.context, which stays the
+  // non-fullscreen Video's): isFullscreen / exitFullscreen need the route they are in.
+  Widget _controls(VideoState state) => Builder(builder: (context) => _overlay(state, context));
+
+  Widget _overlay(VideoState state, BuildContext context) {
     return Focus(
       autofocus: true,
-      onKeyEvent: (_, e) => _onKey(state.context, e),
+      onKeyEvent: (_, e) => _onKey(context, e),
       child: Stack(
         children: [
           MaterialDesktopVideoControls(state),
