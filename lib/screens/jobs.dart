@@ -76,7 +76,7 @@ class _JobsPageState extends State<JobsPage> {
               : jobs.isEmpty
               ? const EmptyHint('还没有任务，去「搜索与推荐」输入番号开始', icon: Icons.download_outlined)
               : ListView.separated(
-                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), 32),
+                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), bottomGap(context)),
                   itemCount: jobs.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {

@@ -6,6 +6,9 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 
+// --dart-define=JAVHUB_PHONE=true: a phone-sized window, to try the phone layout on a PC
+const _phone = bool.fromEnvironment('JAVHUB_PHONE');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -17,8 +20,8 @@ Future<void> main() async {
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
       title: 'JavHub',
-      size: Size(1440, 900),
-      minimumSize: Size(960, 640),
+      size: _phone ? Size(412, 900) : Size(1440, 900),
+      minimumSize: _phone ? Size(360, 640) : Size(960, 640),
       center: true,
       backgroundColor: Color(0xFF0E1014),
     ),

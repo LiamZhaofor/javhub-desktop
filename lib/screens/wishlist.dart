@@ -83,7 +83,7 @@ class _WishlistPageState extends State<WishlistPage> {
               : items.isEmpty
               ? const EmptyHint('清单为空，搜索结果页可一键加入', icon: Icons.favorite_border_rounded)
               : ListView.separated(
-                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), 32),
+                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), bottomGap(context)),
                   itemCount: items.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, i) {

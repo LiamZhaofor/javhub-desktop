@@ -5,7 +5,7 @@ import '../platform.dart';
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.4.1';
+const appVersion = '0.4.2';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -29,7 +29,7 @@ class SettingsPage extends StatelessWidget {
     );
 
     return ListView(
-      padding: EdgeInsets.only(bottom: 32 + MediaQuery.paddingOf(context).bottom),
+      padding: EdgeInsets.only(bottom: bottomGap(context)),
       children: [
         const PageHeader(title: '设置'),
         Center(

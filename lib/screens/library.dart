@@ -205,7 +205,7 @@ class LibraryPageState extends State<LibraryPage> {
               ? (_loading ? const Center(child: CircularProgressIndicator()) : const EmptyHint('没有符合条件的影片', icon: Icons.movie_filter_outlined))
               : Scrollbar(
                   child: GridView.builder(
-                    padding: EdgeInsets.fromLTRB(pagePad(context), 8, pagePad(context), 32),
+                    padding: EdgeInsets.fromLTRB(pagePad(context), 8, pagePad(context), bottomGap(context)),
                     gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: isCompact(context) ? 140 : 186,
                       mainAxisSpacing: isCompact(context) ? 14 : 22,

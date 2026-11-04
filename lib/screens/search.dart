@@ -185,7 +185,7 @@ class SearchPageState extends State<SearchPage> {
         ? '根据片库 ${b['library']} 部${b['watched'] != null && b['watched'] != 0 ? '、最近看过 ${b['watched']} 部' : ''}${actors.isEmpty ? '' : '；偏好：$actors'}'
         : '';
     return ListView(
-      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 32),
+      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), bottomGap(context)),
       children: [
         Row(
           children: [
@@ -249,7 +249,7 @@ class SearchPageState extends State<SearchPage> {
     final okBackends = _backends?.items.where((b) => b.ok).toList() ?? [];
     final offBackends = _backends?.items.where((b) => !b.ok && b.name != 'qbittorrent').map((b) => b.title).toSet() ?? {};
     return ListView(
-      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 32),
+      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), bottomGap(context)),
       children: [
         if (d.found)
           Card(
