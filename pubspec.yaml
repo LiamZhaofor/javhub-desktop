@@ -1,0 +1,44 @@
+name: javhub_desktop
+description: JavHub 的 Windows 原生客户端：片库、搜索下载、推荐、任务、想看，mpv 播放 + 115 本地代理 + 字幕悬浮球。
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  shared_preferences: ^2.5.5
+  path_provider: ^2.1.5
+  file_picker: ^11.0.2
+  url_launcher: ^6.3.2
+  window_manager: ^0.5.1
+  media_kit: 1.2.6
+  media_kit_video: 2.0.1
+  media_kit_libs_windows_video: 1.0.12
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+# The same media_kit set moonfin-jav plays 115 streams with (checked smooth there).
+dependency_overrides:
+  # Fork of 1.0.12 with a newer libmpv (and PGS subtitles that render).
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/RadicalMuffinMan/media-kit.git
+      path: libs/windows/media_kit_libs_windows_video
+      ref: 50013aee7429633ae2df656982167ca6d21237ce
+  media_kit_video:
+    git:
+      url: https://github.com/RadicalMuffinMan/media-kit.git
+      path: media_kit_video
+      ref: 50013aee7429633ae2df656982167ca6d21237ce
+  # objective_c 9.3.0's build hook breaks `flutter test` on Flutter 3.47.
+  objective_c: ^9.4.1
+
+flutter:
+  uses-material-design: true

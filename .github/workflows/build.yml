@@ -1,0 +1,77 @@
+name: Build (Windows)
+
+# Analyze and test on Linux first (fast), then build the Windows app and publish it
+# as the rolling "latest" pre-release (a zip: unpack and run JavHub.exe).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.2'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+      - name: Unit tests
+        run: flutter test
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Windows runner
+        shell: pwsh
+        run: |
+          # the platform folder is generated, then given the app's name and icon
+          flutter create --platforms=windows --project-name javhub_desktop --org codes.liamzhao .
+          Remove-Item test/widget_test.dart -ErrorAction SilentlyContinue
+          (Get-Content windows/runner/main.cpp -Raw) -replace 'L"javhub_desktop"', 'L"JavHub"' | Set-Content windows/runner/main.cpp -NoNewline
+          $rc = Get-Content windows/runner/Runner.rc -Raw
+          $rc = $rc -replace '"FileDescription", "javhub_desktop"', '"FileDescription", "JavHub"' -replace '"ProductName", "javhub_desktop"', '"ProductName", "JavHub"' -replace '"OriginalFilename", "javhub_desktop.exe"', '"OriginalFilename", "JavHub.exe"'
+          Set-Content windows/runner/Runner.rc $rc -NoNewline
+          (Get-Content windows/CMakeLists.txt -Raw) -replace 'set\(BINARY_NAME "javhub_desktop"\)', 'set(BINARY_NAME "JavHub")' | Set-Content windows/CMakeLists.txt -NoNewline
+          Copy-Item assets/app_icon.ico windows/runner/resources/app_icon.ico -Force
+      - name: Build
+        run: flutter build windows --release
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          $zip = "JavHub-Windows-v$version.zip"
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: javhub-windows
+          path: ${{ env.ZIP }}
+          if-no-files-found: error
+      - name: Publish "latest" pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "JavHub Windows 客户端自动构建（提交 ${{ github.sha }}）。下载 zip，解压后运行 JavHub.exe。"
+          gh release delete latest --yes --cleanup-tag 2>$null
+          gh release create latest $env:ZIP --prerelease --target ${{ github.sha }} --title "JavHub Windows 最新构建" --notes $notes
