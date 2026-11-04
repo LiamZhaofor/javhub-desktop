@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -164,9 +165,7 @@ class _NetImageState extends State<NetImage> {
       gaplessPlayback: true,
       cacheWidth: widget.decodeWidth,
       frameBuilder: (context, child, frame, sync) {
-        return sync
-          ? child
-          : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 220), child: child);
+        return sync ? child : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 220), child: child);
       },
       errorBuilder: (context, _, _) => _empty(context, broken: true),
     );
@@ -188,7 +187,10 @@ class Badge2 extends StatelessWidget {
       borderRadius: BorderRadius.circular(5),
       boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 4)],
     ),
-    child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700, height: 1.3)),
+    child: Text(
+      text,
+      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700, height: 1.3),
+    ),
   );
 }
 
@@ -197,14 +199,7 @@ const badgeBlue = Color(0xFF2563EB);
 
 /// One movie in a grid: poster with badges, then code and title.
 class PosterTile extends StatefulWidget {
-  const PosterTile({
-    super.key,
-    required this.image,
-    required this.code,
-    required this.subtitle,
-    this.badges = const [],
-    this.onTap,
-  });
+  const PosterTile({super.key, required this.image, required this.code, required this.subtitle, this.badges = const [], this.onTap});
 
   final String image;
   final String code;
@@ -260,10 +255,19 @@ class _PosterTileState extends State<PosterTile> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(widget.code, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text)),
+            Text(
+              widget.code,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text),
+            ),
             const SizedBox(height: 2),
-            Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 12)),
+            Text(
+              widget.subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: p.muted, fontSize: 12),
+            ),
           ],
         ),
       ),
@@ -291,10 +295,7 @@ class ErrorBox extends StatelessWidget {
         Icon(Icons.cloud_off_outlined, color: Palette.of(context).muted, size: 36),
         const SizedBox(height: 10),
         Text(message, textAlign: TextAlign.center),
-        if (onRetry != null) ...[
-          const SizedBox(height: 14),
-          FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
-        ],
+        if (onRetry != null) ...[const SizedBox(height: 14), FilledButton.tonal(onPressed: onRetry, child: const Text('重试'))],
       ],
     ),
   );
@@ -310,11 +311,14 @@ class EmptyHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = Palette.of(context);
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 40, color: p.muted.withValues(alpha: 0.6)),
-        const SizedBox(height: 10),
-        Text(text, style: TextStyle(color: p.muted)),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 40, color: p.muted.withValues(alpha: 0.6)),
+          const SizedBox(height: 10),
+          Text(text, style: TextStyle(color: p.muted)),
+        ],
+      ),
     );
   }
 }
@@ -334,7 +338,11 @@ class SelectBox<T> extends StatelessWidget {
     return Container(
       height: 34,
       padding: const EdgeInsets.only(left: 10, right: 4),
-      decoration: BoxDecoration(color: p.surface, border: Border.all(color: p.line), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(
+        color: p.surface,
+        border: Border.all(color: p.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<T>(
           value: options.containsKey(value) ? value : options.keys.first,
@@ -347,15 +355,43 @@ class SelectBox<T> extends StatelessWidget {
             for (final e in options.entries)
               DropdownMenuItem(
                 value: e.key,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (icon != null) ...[Icon(icon, size: 15, color: p.muted), const SizedBox(width: 6)],
-                  Text(e.value),
-                ]),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[Icon(icon, size: 15, color: p.muted), const SizedBox(width: 6)],
+                    Text(e.value),
+                  ],
+                ),
               ),
           ],
           onChanged: (v) {
             if (v != null) onChanged(v);
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// Frosted glass behind the phone's status bar, for a page that scrolls up under it
+/// (place it last in a Stack). Nothing where there is no status bar.
+class StatusBarGlass extends StatelessWidget {
+  const StatusBarGlass({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    if (top <= 0) return const SizedBox.shrink();
+    final p = Palette.of(context);
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      height: top,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: ColoredBox(color: p.bg.withValues(alpha: 0.55)),
         ),
       ),
     );

@@ -311,7 +311,11 @@ class _ShellState extends State<Shell> {
           selected: _tab,
           badge: _activeJobs > 0 ? '$_activeJobs' : null,
           onSelect: (i) {
-            if (i == _tab) return;
+            if (i == _tab) {
+              // the open tab tapped again: back to the top
+              if (i == 1) _libraryKey.currentState?.scrollToTop();
+              return;
+            }
             unawaited(HapticFeedback.selectionClick());
             if (i == 0) unawaited(_homeKey.currentState?.reload());
             setState(() => _tab = i);
