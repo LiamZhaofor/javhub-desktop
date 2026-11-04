@@ -38,6 +38,7 @@ class LibraryItem {
     this.plot = '',
     this.stills = const [],
     this.watchedAt = 0,
+    this.progress,
   });
 
   factory LibraryItem.fromJson(Map<String, dynamic> j) => LibraryItem(
@@ -65,6 +66,7 @@ class LibraryItem {
     plot: _s(j['plot']),
     stills: _ls(j['stills']),
     watchedAt: _d(j['watched_at']),
+    progress: j['progress'] is Map ? Progress.fromJson(_m(j['progress'])) : null,
   );
 
   final String id;
@@ -95,6 +97,9 @@ class LibraryItem {
 
   /// When it was last played (home page).
   final double watchedAt;
+
+  /// How far it was watched, on any device (home page).
+  final Progress? progress;
 
   /// The title without the code it usually starts with; the actresses when
   /// there is no title (as under the web library's tiles).
@@ -358,4 +363,42 @@ class Trickplay {
 
   /// Index of the thumbnail for second `t`.
   int indexAt(double t) => interval <= 0 ? 0 : (t / interval).floor().clamp(0, count - 1);
+}
+
+/// Where a movie (one part of it) was left, on whichever device: shared through JavHub.
+class Progress {
+  const Progress({required this.pos, required this.dur, this.done = false, this.part = 0, this.device = '', this.ts = 0});
+
+  factory Progress.fromJson(Map<String, dynamic> j, {int? part}) => Progress(
+    pos: _d(j['pos']),
+    dur: _d(j['dur']),
+    done: _b(j['done']),
+    part: part ?? _i(j['part']),
+    device: _s(j['device']),
+    ts: _d(j['ts']),
+  );
+
+  final double pos;
+  final double dur;
+  final bool done;
+  final int part;
+  final String device;
+  final double ts;
+
+  /// 0-1 for a progress bar (a finished one is full).
+  double get fraction => done ? 1 : (dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0);
+
+  /// Worth offering 继续: some way in, not at the end.
+  bool get resumable => !done && pos > 30 && (dur <= 0 || pos < dur - 60);
+}
+
+/// `/api/progress/{id}`: part -> progress.
+Map<int, Progress> parseProgress(Map<String, dynamic> j) {
+  final parts = j['parts'];
+  if (parts is! Map) return const {};
+  return {
+    for (final e in parts.entries)
+      if (e.value is Map && int.tryParse('${e.key}') != null)
+        int.parse('${e.key}'): Progress.fromJson((e.value as Map).cast<String, dynamic>(), part: int.parse('${e.key}')),
+  };
 }

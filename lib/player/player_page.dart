@@ -37,14 +37,22 @@ class PlayerPage extends StatefulWidget {
     required this.code,
     required this.source,
     this.itemId = '',
+    this.part = 0,
+    this.resume = true,
     this.subtitles = const [],
   });
 
   final String title;
   final String code;
 
-  /// The library item (for its seek-bar previews and the home page's progress).
+  /// The library item (for its seek-bar previews and the shared progress).
   final String itemId;
+
+  /// Which of the item's videos (cd1, cd2 ...).
+  final int part;
+
+  /// Continue where it was left (on any device); false: from the start.
+  final bool resume;
   final PlaySource source;
 
   /// (name, url) of the subtitle files next to the video in the library.
@@ -158,6 +166,7 @@ class _PlayerPageState extends State<PlayerPage> {
     }));
     _subs.add(_player.stream.playing.listen((playing) {
       if (playing && _status != null && mounted) setState(() => _status = null);
+      if (!playing && _resumeDone) unawaited(_savePosition());
     }));
 
     var url = widget.source.url;
@@ -187,17 +196,35 @@ class _PlayerPageState extends State<PlayerPage> {
     _resumeDone = true;
   }
 
-  /// Back to where this movie was left last time.
+  /// Back to where this movie was left: JavHub's shared progress (any device, Emby
+  /// included), else this device's own note of it (offline).
   Future<void> _resume() async {
-    final saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
+    if (!widget.resume) return;
+    var saved = 0;
+    var from = '';
+    Progress? remote;
+    if (widget.itemId.isNotEmpty) {
+      try {
+        remote = (await App.api.progress(widget.itemId).timeout(const Duration(seconds: 8)))[widget.part];
+      } catch (_) {}
+    }
+    if (remote != null) {
+      if (!remote.resumable) return;
+      saved = remote.pos.floor();
+      from = remote.device;
+    } else {
+      saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
+    }
     if (saved < 30) return;
     final duration = await _player.stream.duration
         .firstWhere((d) => d > Duration.zero)
         .timeout(const Duration(seconds: 30), onTimeout: () => Duration.zero);
     if (!mounted || duration == Duration.zero || saved > duration.inSeconds - 60) return;
     await _player.seek(Duration(seconds: saved));
-    _tools.toast('从上次的 ${fmtClock(Duration(seconds: saved))} 继续');
+    _tools.toast('从上次的 ${fmtClock(Duration(seconds: saved))} 继续${from.isEmpty || from == _device ? '' : '（$from）'}');
   }
+
+  static String get _device => Platform.isAndroid ? 'Android' : (Platform.isWindows ? 'Windows' : Platform.operatingSystem);
 
   /// Where to resume next time (also saved during playback: closing the window
   /// skips dispose()).
@@ -211,8 +238,12 @@ class _PlayerPageState extends State<PlayerPage> {
     } else {
       await p.remove(_posKey);
     }
-    // how far it got, for the home page's 最近观看 (a finished one shows as full)
-    if (widget.itemId.isNotEmpty && duration > 0 && pos > 0) await p.setString('prog.${widget.itemId}', '$pos/$duration');
+    // the shared progress: the other devices (and the home page) go on from here
+    if (widget.itemId.isNotEmpty && duration > 0 && pos > 0) {
+      try {
+        await App.api.saveProgress(widget.itemId, widget.part, pos.toDouble(), duration.toDouble(), _device);
+      } catch (_) {}
+    }
   }
 
   @override

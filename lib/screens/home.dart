@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
@@ -38,16 +37,11 @@ class HomePageState extends State<HomePage> {
       final results = await Future.wait([App.api.home(), App.api.library()]);
       final home = results[0] as Home;
       final lib = (results[1] as List<LibraryItem>)..sort((a, b) => b.mtime.compareTo(a.mtime));
-      final prefs = await SharedPreferences.getInstance();
-      final progress = <String, double>{};
-      for (final it in home.recent) {
-        final v = prefs.getString('prog.${it.id}');
-        final parts = v?.split('/');
-        if (parts != null && parts.length == 2) {
-          final pos = double.tryParse(parts[0]) ?? 0, dur = double.tryParse(parts[1]) ?? 0;
-          if (dur > 0) progress[it.id] = (pos / dur).clamp(0, 1);
-        }
-      }
+      // shared by every device (and Emby): JavHub sends it along with the list
+      final progress = <String, double>{
+        for (final it in home.recent)
+          if (it.progress != null && it.progress!.dur > 0) it.id: it.progress!.fraction,
+      };
       if (!mounted) return;
       setState(() {
         _home = home;

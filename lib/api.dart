@@ -221,6 +221,14 @@ class JavHubApi {
 
   Future<Home> home() async => Home.fromJson(await get('/api/home'));
 
+  Future<Map<int, Progress>> progress(String id) async =>
+      parseProgress(await get('/api/progress/${Uri.encodeComponent(id)}'));
+
+  Future<void> saveProgress(String id, int part, double pos, double dur, String device) =>
+      _send(() => _http.put(uri('/api/progress/${Uri.encodeComponent(id)}'),
+          headers: {...authHeaders, 'Content-Type': 'application/json'},
+          body: jsonEncode({'part': part, 'pos': pos.floor(), 'dur': dur.floor(), 'device': device})));
+
   Future<Trickplay> trickplay(String id) async => Trickplay(await get('/api/trickplay/${Uri.encodeComponent(id)}'));
 
   // ---------------- recommendations / wishlist ----------------

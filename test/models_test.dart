@@ -81,4 +81,25 @@ void main() {
     expect(subs.single.fits(const Duration(hours: 2)), isFalse);
     expect(subs.single.fits(Duration.zero), isFalse);
   });
+
+  test('shared progress: parts, resumable, finished', () {
+    final parts = parseProgress({
+      'parts': {
+        '0': {'pos': 600, 'dur': 3600, 'done': 0, 'device': 'Windows', 'ts': 1},
+        '1': {'pos': 3590, 'dur': 3600, 'done': 1, 'device': 'Emby', 'ts': 2},
+        'x': {'pos': 1},
+      },
+      'last': 1,
+    });
+    expect(parts.keys, [0, 1]);
+    expect(parts[0]!.resumable, isTrue);
+    expect(parts[0]!.device, 'Windows');
+    expect(parts[1]!.resumable, isFalse);
+    expect(parts[1]!.fraction, 1.0);
+    expect(const Progress(pos: 10, dur: 3600).resumable, isFalse); // barely started
+    expect(const Progress(pos: 3570, dur: 3600).resumable, isFalse); // the credits
+    final it = LibraryItem.fromJson({'id': 'a', 'code': 'A', 'folder': 'A', 'progress': {'pos': 1800, 'dur': 3600, 'done': 0, 'part': 0}});
+    expect(it.progress!.fraction, 0.5);
+    expect(parseProgress({}), isEmpty);
+  });
 }

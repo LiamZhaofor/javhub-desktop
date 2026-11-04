@@ -43,6 +43,7 @@ class DetailPage extends StatefulWidget {
 class _DetailPageState extends State<DetailPage> {
   String _plot = '';
   List<String> _stills = const [];
+  Map<int, Progress> _progress = const {};
 
   LibraryItem get it => widget.item;
 
@@ -58,8 +59,16 @@ class _DetailPageState extends State<DetailPage> {
         });
       }
     }).catchError((_) {}));
+    unawaited(_loadProgress());
     // the seek-bar previews take a minute to make: start now, before 播放
     unawaited(App.api.trickplay(it.id).then((_) {}).catchError((_) {}));
+  }
+
+  Future<void> _loadProgress() async {
+    try {
+      final p = await App.api.progress(it.id);
+      if (mounted) setState(() => _progress = p);
+    } catch (_) {}
   }
 
   String _still(String name, {int? width}) => App.api.media(it.id, 'extrafanart/$name', width: width, version: it.posterVersion);
@@ -70,7 +79,7 @@ class _DetailPageState extends State<DetailPage> {
     builder: (_) => _StillViewer(urls: [for (final s in _stills) _still(s)], start: start),
   );
 
-  void _play(int i) {
+  void _play(int i, {bool resume = true}) {
     final PlaySource source;
     if (it.cloud) {
       final src = it.sources.length > i ? it.sources[i] : (it.sources.isEmpty ? '' : it.sources.first);
@@ -83,15 +92,17 @@ class _DetailPageState extends State<DetailPage> {
     } else {
       source = PlaySource(url: App.api.media(it.id, it.videos[i]), cloud: false);
     }
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => PlayerPage(
         title: it.videos.length > 1 ? '${it.folder} (${i + 1})' : it.folder,
         code: it.code,
         itemId: it.id,
+        part: i,
+        resume: resume,
         source: source,
         subtitles: [for (final s in it.subs) (s, App.api.media(it.id, s))],
       ),
-    ));
+    )).then((_) => Future<void>.delayed(const Duration(milliseconds: 600), _loadProgress));
   }
 
   Widget _chip(String text, {IconData? icon}) => ActionChip(
@@ -180,12 +191,22 @@ class _DetailPageState extends State<DetailPage> {
                             ]),
                             const SizedBox(height: 22),
                             Wrap(spacing: 10, runSpacing: 10, children: [
-                              for (var i = 0; i < it.videos.length; i++)
+                              for (var i = 0; i < it.videos.length; i++) ...[
                                 FilledButton.icon(
                                   onPressed: () => _play(i),
                                   icon: const Icon(Icons.play_arrow_rounded),
-                                  label: Text(it.videos.length > 1 ? '播放 ${i + 1}' : '播放'),
+                                  label: Text([
+                                    if (_progress[i]?.resumable ?? false) '继续 ${fmtClock(Duration(seconds: _progress[i]!.pos.floor()))}' else '播放',
+                                    if (it.videos.length > 1) '${i + 1}',
+                                  ].join(' ')),
                                 ),
+                                if (_progress[i]?.resumable ?? false)
+                                  OutlinedButton.icon(
+                                    onPressed: () => _play(i, resume: false),
+                                    icon: const Icon(Icons.replay_rounded, size: 18),
+                                    label: const Text('从头播放'),
+                                  ),
+                              ],
                               OutlinedButton.icon(
                                 onPressed: widget.onSearch == null ? null : () => widget.onSearch!(it.code),
                                 icon: const Icon(Icons.travel_explore_rounded, size: 18),

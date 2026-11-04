@@ -4,7 +4,7 @@ import '../app.dart';
 import '../platform.dart';
 import '../theme.dart';
 
-const appVersion = '0.3.1';
+const appVersion = '0.4.0';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});

@@ -1,7 +1,7 @@
 name: javhub_desktop
 description: JavHub 的 Windows 原生客户端：片库、搜索下载、推荐、任务、想看，mpv 播放 + 115 本地代理 + 字幕悬浮球。
 publish_to: none
-version: 0.3.1+4
+version: 0.4.0+5
 
 environment:
   sdk: ">=3.9.0 <4.0.0"
