@@ -39,6 +39,10 @@ dependency_overrides:
       ref: 50013aee7429633ae2df656982167ca6d21237ce
   # objective_c 9.3.0's build hook breaks `flutter test` on Flutter 3.47.
   objective_c: ^9.4.1
+  # 2.6.x of these generate FFI code that fails constant evaluation in the
+  # Windows build on Flutter 3.47; the versions moonfin-jav builds with.
+  shared_preferences_foundation: 2.5.7
+  path_provider_foundation: 2.6.0
 
 flutter:
   uses-material-design: true
