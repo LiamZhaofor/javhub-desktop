@@ -29,11 +29,24 @@ android {
         versionName = flutter.versionName
     }
 
+    // Every build must carry the same certificate, or Android refuses to install it over the
+    // copy on the phone. CI names its keystore in JAVHUB_KEYSTORE (the same key as this PC's
+    // ~/.android/debug.keystore); a local build without it signs with that debug key.
+    val javhubKeystore = System.getenv("JAVHUB_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (javhubKeystore != null) {
+            create("javhub") {
+                storeFile = javhubKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (javhubKeystore != null) "javhub" else "debug")
         }
     }
 }
