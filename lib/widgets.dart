@@ -9,8 +9,9 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'app.dart';
+import 'theme.dart';
 
-const accent = Color(0xFFE5484D);
+export 'theme.dart' show accent, Palette, PageHeader;
 
 /// Pictures from JavHub, kept on disk: the library's poster URLs carry the
 /// artwork version (`v=`), so a cached file is good for as long as the URL is.
@@ -61,8 +62,9 @@ class ImageStore {
     try {
       final r = await _client.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 40));
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
-      unawaited(file.writeAsBytes(r.bodyBytes).then((_) {}, onError: (_) {}));
-      return _remember(url, r.bodyBytes);
+      final bytes = Uint8List.fromList(r.bodyBytes);
+      unawaited(file.writeAsBytes(bytes).then((_) {}, onError: (_) {}));
+      return _remember(url, bytes);
     } catch (_) {
       return null;
     } finally {
@@ -99,12 +101,11 @@ class ImageStore {
 }
 
 class NetImage extends StatefulWidget {
-  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth, this.placeholder});
+  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth});
 
   final String url;
   final BoxFit fit;
   final int? decodeWidth;
-  final Widget? placeholder;
 
   @override
   State<NetImage> createState() => _NetImageState();
@@ -128,11 +129,8 @@ class _NetImageState extends State<NetImage> {
 
   void _fetch() {
     _bytes = ImageStore.instance.peek(widget.url);
-    _failed = false;
-    if (_bytes != null || widget.url.isEmpty) {
-      _failed = widget.url.isEmpty;
-      return;
-    }
+    _failed = widget.url.isEmpty;
+    if (_bytes != null || _failed) return;
     final url = widget.url;
     ImageStore.instance.load(url, App.api.authHeaders).then((b) {
       if (!mounted || url != widget.url) return;
@@ -143,28 +141,33 @@ class _NetImageState extends State<NetImage> {
     });
   }
 
+  Widget _empty(BuildContext context, {bool broken = false}) {
+    final p = Palette.of(context);
+    return Container(
+      color: p.raised,
+      alignment: Alignment.center,
+      child: broken ? Icon(Icons.movie_outlined, color: p.muted.withValues(alpha: 0.6), size: 28) : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final b = _bytes;
-    if (b == null) {
-      return widget.placeholder ??
-          Container(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            alignment: Alignment.center,
-            child: _failed ? Icon(Icons.image_not_supported_outlined, color: Theme.of(context).hintColor) : null,
-          );
-    }
+    if (b == null) return _empty(context, broken: _failed);
     return Image.memory(
       b,
       fit: widget.fit,
       gaplessPlayback: true,
       cacheWidth: widget.decodeWidth,
-      errorBuilder: (_, _, _) => Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+      frameBuilder: (context, child, frame, sync) => sync
+          ? child
+          : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 220), child: child),
+      errorBuilder: (context, _, _) => _empty(context, broken: true),
     );
   }
 }
 
-/// A small coloured label on a poster.
+/// A small label on a poster.
 class Badge2 extends StatelessWidget {
   const Badge2(this.text, {super.key, this.color = accent});
 
@@ -174,12 +177,19 @@ class Badge2 extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(4)),
-    child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(5),
+      boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 4)],
+    ),
+    child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700, height: 1.3)),
   );
 }
 
-/// One movie in a grid: poster, badges, code and title.
+const badgeDark = Color(0xB3000000);
+const badgeBlue = Color(0xFF2563EB);
+
+/// One movie in a grid: poster with badges, then code and title.
 class PosterTile extends StatefulWidget {
   const PosterTile({
     super.key,
@@ -205,39 +215,50 @@ class _PosterTileState extends State<PosterTile> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final p = Palette.of(context);
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _hover ? 1.03 : 1,
-          duration: const Duration(milliseconds: 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                transform: Matrix4.translationValues(0, _hover ? -4 : 0, 0),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _hover ? accent.withValues(alpha: 0.8) : p.line, width: _hover ? 1.5 : 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: _hover ? 0.35 : 0.12),
+                      blurRadius: _hover ? 18 : 6,
+                      offset: Offset(0, _hover ? 8 : 2),
+                    ),
+                  ],
+                ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(11),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       NetImage(widget.image, decodeWidth: 360),
-                      if (_hover) Container(color: Colors.white.withValues(alpha: 0.06)),
-                      Positioned(left: 6, top: 6, right: 6, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
+                      Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(widget.code, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-              Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-            ],
-          ),
+            ),
+            const SizedBox(height: 8),
+            Text(widget.code, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text)),
+            const SizedBox(height: 2),
+            Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 12)),
+          ],
         ),
       ),
     );
@@ -247,7 +268,7 @@ class _PosterTileState extends State<PosterTile> {
 void toast(BuildContext context, String text) {
   ScaffoldMessenger.maybeOf(context)
     ?..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 3)));
+    ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 3)));
 }
 
 class ErrorBox extends StatelessWidget {
@@ -261,14 +282,76 @@ class ErrorBox extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 32),
-        const SizedBox(height: 8),
+        Icon(Icons.cloud_off_outlined, color: Palette.of(context).muted, size: 36),
+        const SizedBox(height: 10),
         Text(message, textAlign: TextAlign.center),
         if (onRetry != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
         ],
       ],
     ),
   );
+}
+
+class EmptyHint extends StatelessWidget {
+  const EmptyHint(this.text, {super.key, this.icon = Icons.inbox_outlined});
+
+  final String text;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 40, color: p.muted.withValues(alpha: 0.6)),
+        const SizedBox(height: 10),
+        Text(text, style: TextStyle(color: p.muted)),
+      ]),
+    );
+  }
+}
+
+/// A rounded, bordered drop-down that fits next to chips.
+class SelectBox<T> extends StatelessWidget {
+  const SelectBox({super.key, required this.value, required this.options, required this.onChanged, this.icon});
+
+  final T value;
+  final Map<T, String> options;
+  final ValueChanged<T> onChanged;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.only(left: 10, right: 4),
+      decoration: BoxDecoration(color: p.surface, border: Border.all(color: p.line), borderRadius: BorderRadius.circular(8)),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: options.containsKey(value) ? value : options.keys.first,
+          isDense: true,
+          borderRadius: BorderRadius.circular(10),
+          dropdownColor: p.surface,
+          icon: Icon(Icons.expand_more, size: 18, color: p.muted),
+          style: TextStyle(color: p.text, fontSize: 13, fontFamily: Theme.of(context).textTheme.bodyMedium?.fontFamily),
+          items: [
+            for (final e in options.entries)
+              DropdownMenuItem(
+                value: e.key,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (icon != null) ...[Icon(icon, size: 15, color: p.muted), const SizedBox(width: 6)],
+                  Text(e.value),
+                ]),
+              ),
+          ],
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ),
+    );
+  }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../theme.dart';
 import 'stream_proxy.dart';
-import 'subtitle_ball.dart';
 import 'tools.dart';
 
 class PlaySource {
@@ -20,6 +21,11 @@ class PlaySource {
   /// A 115 file: played through the loopback proxy straight from the CDN.
   final bool cloud;
 }
+
+enum _Panel { subtitles, speed, settings }
+
+const _rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+const _fits = {BoxFit.contain: '适应', BoxFit.cover: '填充', BoxFit.fill: '拉伸'};
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.title, required this.code, required this.source, this.subtitles = const []});
@@ -39,18 +45,30 @@ class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player(
     configuration: PlayerConfiguration(
       title: widget.title,
-      // mpv draws the subtitles itself (ASS styles kept), so the subtitle ball's
-      // position / size / colour apply
+      // mpv draws the subtitles itself (ASS styles kept)
       libass: true,
       bufferSize: 64 << 20,
     ),
   );
   late final VideoController _video = VideoController(_player);
   late final JavPlayerTools _tools = JavPlayerTools(player: _player, code: widget.code);
+
   String? _status = '正在打开…';
   String? _error;
   final _subs = <StreamSubscription<Object?>>[];
   Duration _lastPos = Duration.zero;
+
+  final _panel = ValueNotifier<_Panel?>(null);
+  final _fit = ValueNotifier<BoxFit>(BoxFit.contain);
+  final _hwdec = ValueNotifier<bool>(true);
+  final _stats = ValueNotifier<bool>(false);
+  final _statsText = ValueNotifier<String>('');
+  Timer? _statsTimer;
+
+  // online subtitle search
+  List<OnlineSubtitle>? _online;
+  bool _searching = false;
+  String? _searchError;
 
   String get _posKey => 'pos.${widget.source.url.split('?').first}';
 
@@ -61,19 +79,13 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _start() async {
-    final native = _player.platform is NativePlayer ? _player.platform as NativePlayer : null;
-    Future<void> set(String k, String v) async {
-      try {
-        await native?.setProperty(k, v);
-      } catch (_) {}
-    }
-
-    await set('network-timeout', '20');
-    await set('demuxer-max-bytes', '256MiB');
-    await set('demuxer-max-back-bytes', '64MiB');
-    await set('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
-    await set('sub-font', 'Microsoft YaHei');
-    await set('sub-auto', 'no');
+    await _tools.setProperty('network-timeout', '20');
+    await _tools.setProperty('demuxer-max-bytes', '256MiB');
+    await _tools.setProperty('demuxer-max-back-bytes', '64MiB');
+    await _tools.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
+    await _tools.setProperty('sub-font', 'Microsoft YaHei');
+    await _tools.setProperty('sub-auto', 'no');
+    await _tools.setProperty('hwdec', 'auto-safe');
 
     _subs.add(_player.stream.error.listen((e) {
       if (mounted) _tools.toast('播放出错: $e');
@@ -104,7 +116,7 @@ class _PlayerPageState extends State<PlayerPage> {
     await _tools.init();
     // the library's own subtitles: the first one ends up selected
     for (final (name, subUrl) in widget.subtitles.reversed) {
-      await _tools.loadRemoteFile(name, subUrl, App.api.authHeaders, quiet: true);
+      await _tools.loadRemoteFile(name, subUrl, App.api.authHeaders);
     }
     await _resume();
   }
@@ -113,10 +125,9 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _resume() async {
     final saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
     if (saved < 30) return;
-    final duration = await _player.stream.duration.firstWhere((d) => d > Duration.zero).timeout(
-      const Duration(seconds: 30),
-      onTimeout: () => Duration.zero,
-    );
+    final duration = await _player.stream.duration
+        .firstWhere((d) => d > Duration.zero)
+        .timeout(const Duration(seconds: 30), onTimeout: () => Duration.zero);
     if (!mounted || duration == Duration.zero || saved > duration.inSeconds - 60) return;
     await _player.seek(Duration(seconds: saved));
     _tools.toast('从上次的 ${fmtClock(Duration(seconds: saved))} 继续');
@@ -134,27 +145,106 @@ class _PlayerPageState extends State<PlayerPage> {
         p.remove(_posKey);
       }
     }));
+    _statsTimer?.cancel();
     for (final s in _subs) {
       unawaited(s.cancel());
     }
     _tools.dispose();
     unawaited(_player.dispose());
+    for (final n in [_panel, _fit, _hwdec, _stats, _statsText]) {
+      n.dispose();
+    }
     super.dispose();
   }
 
+  // ---------------- actions ----------------
+
   void _back(BuildContext context) {
-    if (isFullscreen(context)) {
+    if (_panel.value != null) {
+      _panel.value = null;
+    } else if (isFullscreen(context)) {
       unawaited(exitFullscreen(context));
     } else {
       Navigator.of(this.context).maybePop();
     }
   }
 
-  // Keys for the whole player: the subtitle ball's (z / x / c by default), F for
-  // fullscreen, Esc for back. Built inside the controls, so fullscreen has them too.
+  void _toggle(_Panel p) => _panel.value = _panel.value == p ? null : p;
+
+  void _volume(double delta) {
+    final v = (_player.state.volume + delta).clamp(0.0, 100.0);
+    unawaited(_player.setVolume(v));
+    _tools.toast('音量 ${v.round()}');
+  }
+
+  Future<void> _searchOnline() async {
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final found = await _tools.searchOnline();
+      final video = _player.state.duration;
+      // the ones made for a video of this length first
+      found.sort((a, b) => (b.fits(video) ? 1 : 0) - (a.fits(video) ? 1 : 0));
+      if (mounted) setState(() => _online = found);
+    } catch (e) {
+      if (mounted) setState(() => _searchError = '$e'.replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _screenshot() async {
+    try {
+      final bytes = await _player.screenshot(format: 'image/jpeg');
+      if (bytes == null) throw Exception('没有画面');
+      final dir = Directory('${Platform.environment['USERPROFILE'] ?? '.'}${Platform.pathSeparator}Pictures${Platform.pathSeparator}JavHub');
+      await dir.create(recursive: true);
+      final t = _player.state.position;
+      final name = '${widget.code.isEmpty ? 'JavHub' : widget.code}_${fmtClock(t).replaceAll(':', '-')}.jpg';
+      await File('${dir.path}${Platform.pathSeparator}$name').writeAsBytes(bytes);
+      _tools.toast('截图已保存到 图片\\JavHub\\$name');
+    } catch (e) {
+      _tools.toast('截图失败: $e');
+    }
+  }
+
+  void _setStats(bool on) {
+    _stats.value = on;
+    _statsTimer?.cancel();
+    if (!on) return;
+    Future<void> poll() async {
+      final g = _tools.getProperty;
+      final values = await Future.wait([
+        g('video-codec'), g('hwdec-current'), g('estimated-vf-fps'), g('video-bitrate'),
+        g('audio-codec-name'), g('demuxer-cache-duration'), g('frame-drop-count'), g('cache-speed'),
+      ]);
+      final s = _player.state;
+      String num(String v, [int digits = 1]) => double.tryParse(v)?.toStringAsFixed(digits) ?? '-';
+      final kbps = (double.tryParse(values[3]) ?? 0) / 1000;
+      final speed = (double.tryParse(values[7]) ?? 0) / 1024 / 1024;
+      _statsText.value = [
+        '分辨率  ${s.width ?? '-'} × ${s.height ?? '-'}   ${num(values[2], 2)} fps',
+        '视频    ${values[0].isEmpty ? '-' : values[0]}',
+        '解码    ${values[1].isEmpty || values[1] == 'no' ? '软件' : '硬件 (${values[1]})'}',
+        '码率    ${kbps > 0 ? '${kbps.toStringAsFixed(0)} kbps' : '-'}',
+        '音频    ${values[4].isEmpty ? '-' : values[4]}',
+        '缓冲    ${num(values[5])} 秒   下载 ${speed.toStringAsFixed(2)} MB/s',
+        '丢帧    ${values[6].isEmpty ? '0' : values[6]}',
+        '来源    ${widget.source.cloud ? '115 直连（本地代理）' : 'NAS'}',
+      ].join('\n');
+    }
+
+    unawaited(poll());
+    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => unawaited(poll()));
+  }
+
+  // ---------------- keys ----------------
+
   KeyEventResult _onKey(BuildContext context, KeyEvent e) {
     if (_tools.handleKey(e)) return KeyEventResult.handled;
-    if (e is! KeyDownEvent || _tools.panelFocused) return KeyEventResult.ignored;
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
     if (e.logicalKey == LogicalKeyboardKey.keyF || e.logicalKey == LogicalKeyboardKey.enter) {
       unawaited(toggleFullscreen(context));
       return KeyEventResult.handled;
@@ -166,20 +256,7 @@ class _PlayerPageState extends State<PlayerPage> {
     return KeyEventResult.ignored;
   }
 
-  void _volume(double delta) {
-    final v = (_player.state.volume + delta).clamp(0.0, 100.0);
-    unawaited(_player.setVolume(v));
-    _tools.toast('音量 ${v.round()}');
-  }
-
-  static const _rates = [1.0, 1.25, 1.5, 2.0, 3.0];
-
-  void _cycleRate() {
-    final i = _rates.indexWhere((r) => (r - _player.state.rate).abs() < 0.01);
-    final next = _rates[(i + 1) % _rates.length];
-    unawaited(_player.setRate(next));
-    _tools.toast('${next}x 倍速');
-  }
+  // ---------------- controls ----------------
 
   // The context of the controls themselves (not state.context, which stays the
   // non-fullscreen Video's): isFullscreen / exitFullscreen need the route they are in.
@@ -192,29 +269,283 @@ class _PlayerPageState extends State<PlayerPage> {
       child: Stack(
         children: [
           MaterialDesktopVideoControls(state),
-          Positioned.fill(child: JavSubtitleBall(tools: _tools, showBall: true)),
-          if (_status != null || _error != null)
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(10)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (_error == null) ...[
-                    const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-                    const SizedBox(width: 12),
-                  ],
-                  Text(_error ?? _status!, style: TextStyle(color: _error == null ? Colors.white : Colors.redAccent)),
-                ]),
+          // statistics, top left
+          ValueListenableBuilder<bool>(
+            valueListenable: _stats,
+            builder: (_, on, _) => !on
+                ? const SizedBox.shrink()
+                : Positioned(
+                    left: 16,
+                    top: 64,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xB0000000), borderRadius: BorderRadius.circular(10)),
+                        child: ValueListenableBuilder<String>(
+                          valueListenable: _statsText,
+                          builder: (_, t, _) => Text(t, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.6, fontFamily: 'Consolas')),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+          // messages and the speed-up pill, top centre
+          Positioned(
+            top: 64,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_tools, _tools.message]),
+                  builder: (_, _) {
+                    final text = _tools.accelerating
+                        ? '▶▶  ${_tools.settings.accelerationRate.toStringAsFixed(_tools.settings.accelerationRate % 1 == 0 ? 0 : 1)}× 加速中'
+                        : _tools.message.value;
+                    return AnimatedOpacity(
+                      opacity: text == null ? 0 : 1,
+                      duration: const Duration(milliseconds: 180),
+                      child: text == null ? const SizedBox.shrink() : _Pill(text),
+                    );
+                  },
+                ),
               ),
             ),
+          ),
+          if (_status != null || _error != null)
+            Center(
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+                  decoration: BoxDecoration(color: const Color(0xC0000000), borderRadius: BorderRadius.circular(12)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (_error == null) ...[
+                      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                      const SizedBox(width: 12),
+                    ],
+                    Text(_error ?? _status!, style: TextStyle(color: _error == null ? Colors.white : const Color(0xFFFF8A8D), fontSize: 14)),
+                  ]),
+                ),
+              ),
+            ),
+          // the open menu, above the button bar on the right
+          ValueListenableBuilder<_Panel?>(
+            valueListenable: _panel,
+            builder: (context, panel, _) => panel == null
+                ? const SizedBox.shrink()
+                : Stack(children: [
+                    // a click anywhere else closes it
+                    Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _panel.value = null)),
+                    Positioned(
+                      right: 16,
+                      bottom: 76,
+                      child: _PanelBox(
+                        child: switch (panel) {
+                          _Panel.subtitles => _subtitlePanel(),
+                          _Panel.speed => _speedPanel(),
+                          _Panel.settings => _settingsPanel(state),
+                        },
+                      ),
+                    ),
+                  ]),
+          ),
         ],
       ),
     );
   }
 
-  MaterialDesktopVideoControlsThemeData _theme(BuildContext context) => MaterialDesktopVideoControlsThemeData(
-    seekBarThumbColor: const Color(0xFFE5484D),
-    seekBarPositionColor: const Color(0xFFE5484D),
+  Widget _subtitlePanel() => StatefulBuilder(
+    builder: (context, setLocal) {
+      void refresh(VoidCallback f) {
+        f();
+        setLocal(() {});
+      }
+
+      return AnimatedBuilder(
+        animation: _tools,
+        builder: (_, _) => StreamBuilder<Track>(
+          stream: _player.stream.track,
+          builder: (_, _) {
+            final tracks = _player.state.tracks.subtitle.where((t) => t.id != 'auto' && t.id != 'no').toList();
+            final current = _player.state.track.subtitle;
+            final video = _player.state.duration;
+            return SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _PanelTitle('字幕', trailing: Switch(value: _tools.subtitlesOn, onChanged: (v) => _tools.setSubtitlesOn(v))),
+                  if (tracks.isNotEmpty) ...[
+                    const _PanelLabel('字幕轨'),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 150),
+                      child: ListView(shrinkWrap: true, children: [
+                        for (final t in tracks)
+                          _MenuRow(
+                            selected: t.id == current.id && _tools.subtitlesOn,
+                            title: t.title ?? t.language ?? '字幕 ${t.id}',
+                            onTap: () async {
+                              await _player.setSubtitleTrack(t);
+                              if (!_tools.subtitlesOn) await _tools.setSubtitlesOn(true);
+                              setLocal(() {});
+                            },
+                          ),
+                      ]),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  _PanelLabel('在线字幕${widget.code.isEmpty ? '' : ' · ${widget.code}'}',
+                      trailing: _online == null
+                          ? null
+                          : InkWell(
+                              onTap: _searching ? null : () => _searchOnline().then((_) => setLocal(() {})),
+                              child: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white54),
+                            )),
+                  if (_online == null && !_searching)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                      child: FilledButton.icon(
+                        onPressed: widget.code.isEmpty ? null : () => _searchOnline().then((_) => setLocal(() {})),
+                        icon: const Icon(Icons.travel_explore_rounded, size: 18),
+                        label: const Text('按番号搜索字幕'),
+                      ),
+                    ),
+                  if (_searching)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                    ),
+                  if (_searchError != null)
+                    Padding(padding: const EdgeInsets.fromLTRB(14, 4, 14, 10), child: Text(_searchError!, style: const TextStyle(color: Color(0xFFFF8A8D), fontSize: 12.5))),
+                  if (_online != null && !_searching)
+                    _online!.isEmpty
+                        ? const Padding(padding: EdgeInsets.fromLTRB(14, 4, 14, 12), child: Text('没有找到在线字幕', style: TextStyle(color: Colors.white54, fontSize: 12.5)))
+                        : ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 260),
+                            child: ListView(shrinkWrap: true, children: [
+                              for (final s in _online!)
+                                _MenuRow(
+                                  selected: _tools.loadedOnline.contains(s.url),
+                                  title: s.name,
+                                  subtitle: [s.ext.toUpperCase(), if (s.duration != null) fmtClock(s.duration!), if (s.extra.isNotEmpty) s.extra].join(' · '),
+                                  tag: s.fits(video) ? '推荐' : null,
+                                  onTap: () => _tools.loadOnlineSubtitle(s).then((_) => refresh(() {})),
+                                ),
+                            ]),
+                          ),
+                  const SizedBox(height: 6),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
+
+  Widget _speedPanel() => StreamBuilder<double>(
+    stream: _player.stream.rate,
+    builder: (_, _) => SizedBox(
+      width: 200,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const _PanelTitle('播放速度'),
+        for (final r in _rates)
+          _MenuRow(
+            selected: (r - _player.state.rate).abs() < 0.01,
+            title: r == 1.0 ? '正常' : '${r}x',
+            onTap: () {
+              unawaited(_player.setRate(r));
+              _panel.value = null;
+            },
+          ),
+        const SizedBox(height: 6),
+      ]),
+    ),
+  );
+
+  Widget _settingsPanel(VideoState state) => StreamBuilder<Track>(
+    stream: _player.stream.track,
+    builder: (_, _) {
+      final audio = _player.state.tracks.audio.where((t) => t.id != 'auto' && t.id != 'no').toList();
+      return SizedBox(
+        width: 320,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const _PanelTitle('播放设置'),
+          const _PanelLabel('画面比例'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: ValueListenableBuilder<BoxFit>(
+              valueListenable: _fit,
+              builder: (_, fit, _) => Row(children: [
+                for (final e in _fits.entries)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: _Segment(
+                        text: e.value,
+                        selected: fit == e.key,
+                        onTap: () {
+                          _fit.value = e.key;
+                          state.update(fit: e.key);
+                        },
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
+          if (audio.length > 1) ...[
+            const _PanelLabel('音轨'),
+            for (final t in audio)
+              _MenuRow(
+                selected: t.id == _player.state.track.audio.id,
+                title: [t.title, t.language].whereType<String>().join(' · ').ifEmpty('音轨 ${t.id}'),
+                onTap: () => unawaited(_player.setAudioTrack(t)),
+              ),
+          ],
+          const SizedBox(height: 4),
+          ValueListenableBuilder<bool>(
+            valueListenable: _hwdec,
+            builder: (_, on, _) => _SwitchRow(
+              icon: Icons.memory_rounded,
+              title: '硬件解码',
+              value: on,
+              onChanged: (v) {
+                _hwdec.value = v;
+                unawaited(_tools.setProperty('hwdec', v ? 'auto-safe' : 'no'));
+              },
+            ),
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _stats,
+            builder: (_, on, _) => _SwitchRow(icon: Icons.analytics_outlined, title: '统计信息', value: on, onChanged: _setStats),
+          ),
+          _MenuRow(
+            icon: Icons.photo_camera_outlined,
+            title: '截图',
+            subtitle: '保存到 图片\\JavHub',
+            onTap: () {
+              _panel.value = null;
+              unawaited(_screenshot());
+            },
+          ),
+          const SizedBox(height: 6),
+        ]),
+      );
+    },
+  );
+
+  MaterialDesktopVideoControlsThemeData _theme() => MaterialDesktopVideoControlsThemeData(
+    seekBarThumbColor: accent,
+    seekBarPositionColor: accent,
+    seekBarThumbSize: 14,
+    seekBarHeight: 4,
+    seekBarHoverHeight: 6,
+    volumeBarActiveColor: accent,
+    volumeBarThumbColor: accent,
+    buttonBarHeight: 64,
+    buttonBarButtonSize: 26,
     toggleFullscreenOnDoublePress: true,
     keyboardShortcuts: {
       const SingleActivator(LogicalKeyboardKey.space): () => unawaited(_player.playOrPause()),
@@ -225,36 +556,52 @@ class _PlayerPageState extends State<PlayerPage> {
       const SingleActivator(LogicalKeyboardKey.arrowDown): () => _volume(-5),
     },
     topButtonBar: [
-      Builder(builder: (context) => MaterialDesktopCustomButton(
-        icon: const Icon(Icons.arrow_back),
-        onPressed: () => _back(context),
-      )),
+      Builder(builder: (context) => MaterialDesktopCustomButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => _back(context))),
       const SizedBox(width: 8),
       Expanded(
         child: Text(widget.title, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
       ),
       if (widget.source.cloud)
-        const Padding(
-          padding: EdgeInsets.only(right: 12),
-          child: Text('115 直连', style: TextStyle(color: Colors.white54, fontSize: 12)),
+        Container(
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(color: const Color(0xFF2563EB), borderRadius: BorderRadius.circular(5)),
+          child: const Text('115', style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700)),
         ),
     ],
     bottomButtonBar: [
       const MaterialDesktopPlayOrPauseButton(),
-      MaterialDesktopCustomButton(icon: const Icon(Icons.replay_10), onPressed: () => _tools.queueSeek(-10)),
-      MaterialDesktopCustomButton(icon: const Icon(Icons.forward_10), onPressed: () => _tools.queueSeek(10)),
+      _BarButton(icon: Icons.replay_10_rounded, tooltip: '后退 10 秒 (←)', onPressed: () => _tools.queueSeek(-10)),
+      _BarButton(icon: Icons.forward_10_rounded, tooltip: '前进 10 秒 (→)', onPressed: () => _tools.queueSeek(10)),
       const MaterialDesktopVolumeButton(),
       const MaterialDesktopPositionIndicator(),
       const Spacer(),
-      MaterialDesktopCustomButton(icon: const Icon(Icons.speed), onPressed: _cycleRate),
+      AnimatedBuilder(
+        animation: _tools,
+        builder: (_, _) => _BarButton(
+          icon: _tools.subtitlesOn ? Icons.closed_caption_rounded : Icons.closed_caption_off_outlined,
+          tooltip: '字幕',
+          active: _panel.value == _Panel.subtitles,
+          onPressed: () => _toggle(_Panel.subtitles),
+        ),
+      ),
+      StreamBuilder<double>(
+        stream: _player.stream.rate,
+        builder: (_, _) => _BarTextButton(
+          text: _player.state.rate == 1.0 ? '倍速' : '${_player.state.rate}x',
+          tooltip: '播放速度',
+          onPressed: () => _toggle(_Panel.speed),
+        ),
+      ),
+      _BarButton(icon: Icons.settings_rounded, tooltip: '播放设置', onPressed: () => _toggle(_Panel.settings)),
       const MaterialDesktopFullscreenButton(),
     ],
   );
 
   @override
   Widget build(BuildContext context) {
-    final theme = _theme(context);
+    final theme = _theme();
     return Scaffold(
       backgroundColor: Colors.black,
       body: MaterialDesktopVideoControlsTheme(
@@ -268,4 +615,208 @@ class _PlayerPageState extends State<PlayerPage> {
       ),
     );
   }
+}
+
+extension on String {
+  String ifEmpty(String other) => isEmpty ? other : this;
+}
+
+// ---------------- player widgets (always dark: they sit on the video) ----------------
+
+class _Pill extends StatelessWidget {
+  const _Pill(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+    decoration: BoxDecoration(color: const Color(0xC0000000), borderRadius: BorderRadius.circular(20)),
+    child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w600)),
+  );
+}
+
+class _PanelBox extends StatelessWidget {
+  const _PanelBox({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: buildTheme(Brightness.dark),
+    child: Material(
+      color: const Color(0xF01A1C22),
+      elevation: 12,
+      shadowColor: Colors.black,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: child),
+    ),
+  );
+}
+
+class _PanelTitle extends StatelessWidget {
+  const _PanelTitle(this.text, {this.trailing});
+
+  final String text;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: EdgeInsets.fromLTRB(16, 10, trailing == null ? 16 : 8, 10),
+    margin: const EdgeInsets.only(bottom: 4),
+    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0x22FFFFFF)))),
+    child: Row(children: [
+      Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5))),
+      if (trailing != null) trailing!,
+    ]),
+  );
+}
+
+class _PanelLabel extends StatelessWidget {
+  const _PanelLabel(this.text, {this.trailing});
+
+  final String text;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 14, 4),
+    child: Row(children: [
+      Expanded(child: Text(text, style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600))),
+      if (trailing != null) trailing!,
+    ]),
+  );
+}
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.title, required this.onTap, this.selected = false, this.subtitle, this.icon, this.tag});
+
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final IconData? icon;
+  final String? tag;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    hoverColor: const Color(0x14FFFFFF),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(children: [
+        SizedBox(
+          width: 22,
+          child: icon != null
+              ? Icon(icon, size: 18, color: Colors.white70)
+              : (selected ? const Icon(Icons.check_rounded, size: 18, color: accent) : null),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: selected ? Colors.white : Colors.white.withValues(alpha: 0.88), fontSize: 13.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+            if (subtitle != null && subtitle!.isNotEmpty)
+              Text(subtitle!, style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+          ]),
+        ),
+        if (tag != null)
+          Container(
+            margin: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(4)),
+            child: Text(tag!, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+          ),
+      ]),
+    ),
+  );
+}
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow({required this.icon, required this.title, required this.value, required this.onChanged});
+
+  final IconData icon;
+  final String title;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: () => onChanged(!value),
+    hoverColor: const Color(0x14FFFFFF),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 8, 2),
+      child: Row(children: [
+        SizedBox(width: 22, child: Icon(icon, size: 18, color: Colors.white70)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title, style: const TextStyle(fontSize: 13.5))),
+        Transform.scale(scale: 0.8, child: Switch(value: value, onChanged: onChanged)),
+      ]),
+    ),
+  );
+}
+
+class _Segment extends StatelessWidget {
+  const _Segment({required this.text, required this.selected, required this.onTap});
+
+  final String text;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(8),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: selected ? accent.withValues(alpha: 0.25) : const Color(0x14FFFFFF),
+        border: Border.all(color: selected ? accent : Colors.transparent),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text, style: TextStyle(color: selected ? Colors.white : Colors.white70, fontWeight: FontWeight.w600, fontSize: 13)),
+    ),
+  );
+}
+
+class _BarButton extends StatelessWidget {
+  const _BarButton({required this.icon, required this.tooltip, required this.onPressed, this.active = false});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: IconButton(
+      onPressed: onPressed,
+      iconSize: 26,
+      color: active ? accent : Colors.white,
+      icon: Icon(icon),
+    ),
+  );
+}
+
+class _BarTextButton extends StatelessWidget {
+  const _BarTextButton({required this.text, required this.tooltip, required this.onPressed});
+
+  final String text;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(foregroundColor: Colors.white, minimumSize: const Size(52, 40)),
+      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+    ),
+  );
 }

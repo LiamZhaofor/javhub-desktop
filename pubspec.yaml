@@ -13,8 +13,6 @@ dependencies:
   http: ^1.6.0
   shared_preferences: ^2.5.5
   path_provider: ^2.1.5
-  file_picker: ^11.0.2
-  url_launcher: ^6.3.2
   window_manager: ^0.5.1
   media_kit: 1.2.6
   media_kit_video: 2.0.1

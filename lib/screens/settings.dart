@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app.dart';
-import '../player/settings.dart';
+import '../theme.dart';
 
-const appVersion = '0.1.0';
+const appVersion = '0.2.0';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -12,65 +12,109 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      children: [
-        Text('设置', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 16),
-        Card(
-          child: Column(children: [
-            ListTile(
-              leading: const Icon(Icons.dns_outlined),
-              title: const Text('服务器'),
-              subtitle: Text('${App.api.server}  ·  ${App.api.user}${App.api.lan ? '  ·  局域网' : ''}'),
-              trailing: OutlinedButton(
-                onPressed: () async {
-                  await App.api.logout();
-                  onLogout();
-                },
-                child: const Text('退出登录'),
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.cloud_outlined),
-              title: const Text('115 播放'),
-              subtitle: Text('本机直连 115 CDN，经内置本地代理（最多 2 个连接、2 MB 分块预读），不占家里上行；拖动后从新位置继续。',
-                  style: TextStyle(color: hint)),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.subtitles_outlined),
-              title: const Text('字幕与快捷键'),
-              subtitle: Text('播放时点画面上的「字幕」球调整：在线字幕搜索、偏移、位置、大小、颜色，按住加速键加速，快进 / 快退键。',
-                  style: TextStyle(color: hint)),
-              trailing: TextButton(
-                onPressed: () async {
-                  await JavPlayerSettings().save();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已恢复默认的字幕和快捷键设置')));
-                  }
-                },
-                child: const Text('恢复默认'),
-              ),
-            ),
-          ]),
+    final p = Palette.of(context);
+    Widget section(String title, List<Widget> children) => Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(title, style: TextStyle(color: p.muted, fontSize: 12.5, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
         ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.keyboard_outlined),
-            title: const Text('播放器快捷键'),
-            subtitle: Text(
-              '空格 播放/暂停 · ←/→ 后退/前进 10 秒 · ↑/↓ 音量 · F / 双击 全屏 · Esc 退出全屏/返回\n'
-              'Z 按住 3 倍速 · X / C 快进 / 快退 5 秒（可在字幕球里改）',
-              style: TextStyle(color: hint, height: 1.6),
+        Card(child: Column(children: [
+          for (var i = 0; i < children.length; i++) ...[if (i > 0) const Divider(height: 1, indent: 56), children[i]],
+        ])),
+      ]),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 32),
+      children: [
+        const PageHeader(title: '设置'),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                section('外观', [
+                  ListTile(
+                    leading: const Icon(Icons.palette_outlined),
+                    title: const Text('主题'),
+                    subtitle: const Text('亮色、暗色，或跟随 Windows 设置'),
+                    trailing: ValueListenableBuilder<ThemeMode>(
+                      valueListenable: ThemeController.instance,
+                      builder: (context, mode, _) => SegmentedButton<ThemeMode>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: ThemeMode.system, icon: Icon(Icons.brightness_auto_outlined, size: 17), label: Text('跟随系统')),
+                          ButtonSegment(value: ThemeMode.light, icon: Icon(Icons.light_mode_outlined, size: 17), label: Text('亮色')),
+                          ButtonSegment(value: ThemeMode.dark, icon: Icon(Icons.dark_mode_outlined, size: 17), label: Text('暗色')),
+                        ],
+                        selected: {mode},
+                        onSelectionChanged: (s) => ThemeController.instance.set(s.first),
+                      ),
+                    ),
+                  ),
+                ]),
+                section('账号', [
+                  ListTile(
+                    leading: const Icon(Icons.dns_outlined),
+                    title: Text(App.api.server),
+                    subtitle: Text('${App.api.user}${App.api.lan ? ' · 局域网' : ' · 外网'}'),
+                    trailing: OutlinedButton.icon(
+                      icon: const Icon(Icons.logout_rounded, size: 17),
+                      onPressed: () async {
+                        await App.api.logout();
+                        onLogout();
+                      },
+                      label: const Text('退出登录'),
+                    ),
+                  ),
+                ]),
+                section('播放', [
+                  ListTile(
+                    leading: const Icon(Icons.cloud_outlined),
+                    title: const Text('115 视频'),
+                    subtitle: Text('本机直连 115 CDN，经内置本地代理播放（最多 2 个连接、分块预读），不占家里上行，拖动后从新位置继续',
+                        style: TextStyle(color: p.muted)),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.subtitles_outlined),
+                    title: const Text('字幕'),
+                    subtitle: Text('播放器进度条下方的「字幕」按钮：开关字幕、切换字幕轨、按番号在线搜索字幕', style: TextStyle(color: p.muted)),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.history_rounded),
+                    title: const Text('记住播放位置'),
+                    subtitle: Text('再次打开同一部影片时从上次的位置继续', style: TextStyle(color: p.muted)),
+                  ),
+                ]),
+                section('播放器快捷键', [
+                  for (final (keys, what) in const [
+                    ('空格', '播放 / 暂停'),
+                    ('← / →', '后退 / 前进 10 秒（连按合并为一次跳转）'),
+                    ('↑ / ↓', '音量'),
+                    ('Z（按住）', '3 倍速，松开恢复'),
+                    ('X / C', '前进 / 后退 5 秒'),
+                    ('F 或 双击画面', '全屏'),
+                    ('Esc', '退出全屏 / 返回'),
+                  ])
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.keyboard_outlined, size: 20),
+                      title: Text(what),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(color: p.raised, border: Border.all(color: p.line), borderRadius: BorderRadius.circular(6)),
+                        child: Text(keys, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                      ),
+                    ),
+                ]),
+                Text('JavHub Desktop $appVersion', textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 12)),
+              ]),
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Text('JavHub Desktop $appVersion', style: TextStyle(color: hint, fontSize: 12)),
       ],
     );
   }

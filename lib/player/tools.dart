@@ -2,13 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'settings.dart';
 
@@ -30,6 +28,9 @@ class OnlineSubtitle {
   final Duration? duration;
 
   String get label => extra.isEmpty ? name : '$name ($extra)';
+
+  /// Made for (about) this video: within 2 minutes of its length.
+  bool fits(Duration video) => duration != null && video > Duration.zero && (duration! - video).abs() < const Duration(minutes: 2);
 }
 
 /// Subtitles in a Xunlei `oracle/subtitle` response that mpv can load.
@@ -62,8 +63,8 @@ List<OnlineSubtitle> parseXunleiSubtitles(Object? json) {
   return out;
 }
 
-/// The subtitle ball's brain: applies [JavPlayerSettings] to mpv and handles
-/// the extra hotkeys (hold to speed up, forward / backward).
+/// The player's helpers around mpv: subtitle look, online subtitles, the
+/// hold-to-speed-up and skip keys, and a short on-screen message.
 class JavPlayerTools extends ChangeNotifier {
   JavPlayerTools({required this.player, required this.code, http.Client? client}) : _client = client ?? http.Client();
 
@@ -75,11 +76,10 @@ class JavPlayerTools extends ChangeNotifier {
 
   JavPlayerSettings settings = JavPlayerSettings();
 
-  /// Short status line for the ball's toast.
+  /// Short status line shown over the video.
   final message = ValueNotifier<String?>(null);
   int _messageSerial = 0;
 
-  final List<String> _addedSubtitles = [];
   StreamSubscription<Tracks>? _tracksSub;
   Timer? _reapplyTimer;
   bool _accelerating = false;
@@ -90,8 +90,11 @@ class JavPlayerTools extends ChangeNotifier {
 
   bool get accelerating => _accelerating;
 
-  /// A text field in the ball's panel has focus: keys are typing, not hotkeys.
-  bool panelFocused = false;
+  /// Subtitles shown (mpv `sub-visibility`).
+  bool subtitlesOn = true;
+
+  /// URLs of the online subtitles already loaded (to mark them in the list).
+  final loadedOnline = <String>{};
 
   Future<void> init() async {
     settings = await JavPlayerSettings.load();
@@ -110,65 +113,64 @@ class JavPlayerTools extends ChangeNotifier {
   void toast(String text) {
     final serial = ++_messageSerial;
     message.value = text;
-    Future<void>.delayed(const Duration(seconds: 3), () {
+    Future<void>.delayed(const Duration(milliseconds: 2200), () {
       if (!_disposed && serial == _messageSerial) message.value = null;
     });
   }
 
   // ---------------- mpv ----------------
 
-  NativePlayer? get _native => player.platform is NativePlayer ? player.platform as NativePlayer : null;
+  NativePlayer? get native => player.platform is NativePlayer ? player.platform as NativePlayer : null;
 
-  Future<void> _set(String property, String value) async {
+  Future<void> setProperty(String property, String value) async {
     try {
-      await _native?.setProperty(property, value);
+      await native?.setProperty(property, value);
     } catch (_) {}
   }
 
-  Future<bool> _command(List<String> args) async {
-    final native = _native;
-    if (native == null) return false;
+  Future<String> getProperty(String property) async {
     try {
-      await native.command(args);
+      return await native?.getProperty(property) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<bool> _command(List<String> args) async {
+    final n = native;
+    if (n == null) return false;
+    try {
+      await n.command(args);
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  /// Position, size, color and offset; after every change and whenever the
-  /// track list changes.
+  /// Position, size, colour; after every file change (mpv resets some of them).
   Future<void> applySubtitleSettings() async {
-    await _set('sub-pos', '${settings.mpvSubPos}');
-    await _set('sub-font-size', settings.subtitleSize.round().toString());
-    await _set('sub-color', settings.subtitleColor);
-    // ASS subtitles carry their own styles; let size / color / position apply
-    await _set('sub-ass-override', 'force');
-    await _set('sub-delay', settings.subtitleOffset.toStringAsFixed(2));
+    await setProperty('sub-pos', '${settings.mpvSubPos}');
+    await setProperty('sub-font-size', settings.subtitleSize.round().toString());
+    await setProperty('sub-color', settings.subtitleColor);
+    await setProperty('sub-border-size', '2.5');
+    await setProperty('sub-shadow-offset', '1');
+    // ASS subtitles carry their own styles; keep them readable at our size
+    await setProperty('sub-ass-override', 'force');
+    await setProperty('sub-visibility', subtitlesOn ? 'yes' : 'no');
   }
 
-  Future<void> updateSettings(void Function(JavPlayerSettings s) change) async {
-    change(settings);
+  Future<void> setSubtitlesOn(bool on) async {
+    subtitlesOn = on;
     notifyListeners();
-    await applySubtitleSettings();
-    unawaited(settings.save().catchError((_) {}));
+    await setProperty('sub-visibility', on ? 'yes' : 'no');
+    toast(on ? '字幕已开启' : '字幕已关闭');
   }
 
-  Future<void> saveSettings() async {
-    try {
-      await settings.save();
-      toast('设置已保存');
-    } catch (e) {
-      toast('保存设置失败: $e');
-    }
-  }
+  // ---------------- keys ----------------
 
-  // ---------------- hotkeys ----------------
-
-  /// The accelerate / forward / backward keys. True when the event was one of
-  /// them, so the player's own bindings don't also run.
+  /// The hold-to-speed-up and skip keys (z / x / c by default). True when the
+  /// event was one of them, so the player's own bindings don't also run.
   bool handleKey(KeyEvent event) {
-    if (panelFocused) return false;
     final label = event.logicalKey.keyLabel.toLowerCase();
     if (label.length != 1) return false;
     if (HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed || HardwareKeyboard.instance.isMetaPressed) {
@@ -209,7 +211,7 @@ class JavPlayerTools extends ChangeNotifier {
   void queueSeek(double seconds) {
     _pendingSeekMs += (seconds * 1000).round();
     final total = _pendingSeekMs / 1000;
-    toast('${total >= 0 ? '快进' : '快退'} ${total.abs().toStringAsFixed(total.abs() % 1 == 0 ? 0 : 1)} 秒');
+    toast('${total >= 0 ? '前进' : '后退'} ${total.abs().toStringAsFixed(total.abs() % 1 == 0 ? 0 : 1)} 秒');
     _seekTimer?.cancel();
     _seekTimer = Timer(const Duration(milliseconds: 400), () {
       final ms = _pendingSeekMs;
@@ -228,7 +230,10 @@ class JavPlayerTools extends ChangeNotifier {
   Future<bool> addSubtitleFile(String path, String title) async {
     final ok = await _command(['sub-add', path, 'select', title, 'zh']);
     if (ok) {
-      _addedSubtitles.add(path);
+      if (!subtitlesOn) {
+        subtitlesOn = true;
+        notifyListeners();
+      }
       await applySubtitleSettings();
     }
     return ok;
@@ -237,113 +242,53 @@ class JavPlayerTools extends ChangeNotifier {
   Future<String> _tempFile(String name, List<int> bytes) async {
     final dir = Directory('${(await getTemporaryDirectory()).path}${Platform.pathSeparator}javhub-subtitles');
     await dir.create(recursive: true);
-    final file = File('${dir.path}${Platform.pathSeparator}${DateTime.now().millisecondsSinceEpoch}-$name');
+    final safe = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final file = File('${dir.path}${Platform.pathSeparator}${DateTime.now().millisecondsSinceEpoch}-$safe');
     await file.writeAsBytes(bytes);
     return file.path;
   }
 
   /// A subtitle file of the library item (served by JavHub, behind the login).
-  Future<void> loadRemoteFile(String name, String url, Map<String, String> headers, {bool quiet = false}) async {
+  Future<void> loadRemoteFile(String name, String url, Map<String, String> headers) async {
     try {
       final r = await _client.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 30));
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty) throw Exception('HTTP ${r.statusCode}');
-      final ok = await addSubtitleFile(await _tempFile(name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_'), r.bodyBytes), name);
-      if (!quiet) toast(ok ? '字幕已加载: $name' : '字幕加载失败');
-    } catch (e) {
-      if (!quiet) toast('字幕加载失败: $e');
-    }
-  }
-
-  Future<void> loadLocalSubtitle() async {
-    try {
-      final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: _subtitleExts, dialogTitle: '选择字幕文件');
-      final file = result?.files.single;
-      final path = file?.path;
-      if (path == null) return;
-      final ok = await addSubtitleFile(path, '本地: ${file!.name}');
-      toast(ok ? '本地字幕加载成功' : '本地字幕加载失败');
-    } catch (e) {
-      toast('本地字幕加载失败: $e');
-    }
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return;
+      await addSubtitleFile(await _tempFile(name, r.bodyBytes), name);
+    } catch (_) {}
   }
 
   Future<List<OnlineSubtitle>> searchOnline() async {
-    if (code.isEmpty) {
-      toast('无法从片名识别番号');
-      return const [];
-    }
-    toast('正在搜索字幕: $code …');
-    try {
-      final uri = Uri.https('api-shoulei-ssl.xunlei.com', '/oracle/subtitle', {'name': code});
-      final r = await _client
-          .get(uri, headers: {'Accept': 'application/json, text/plain, */*', 'Cache-Control': 'no-cache'})
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        toast('字幕搜索出错: 服务器错误 ${r.statusCode}');
-        return const [];
-      }
-      final subs = parseXunleiSubtitles(jsonDecode(utf8.decode(r.bodyBytes)));
-      toast(subs.isEmpty ? '没有找到 $code 的字幕' : '找到 ${subs.length} 个字幕');
-      return subs;
-    } on TimeoutException {
-      toast('字幕搜索超时 (15 秒)');
-    } catch (e) {
-      toast('字幕搜索出错: $e');
-    }
-    return const [];
+    if (code.isEmpty) throw Exception('无法从片名识别番号');
+    final uri = Uri.https('api-shoulei-ssl.xunlei.com', '/oracle/subtitle', {'name': code});
+    final r = await _client
+        .get(uri, headers: {'Accept': 'application/json, text/plain, */*', 'Cache-Control': 'no-cache'})
+        .timeout(const Duration(seconds: 15));
+    if (r.statusCode < 200 || r.statusCode >= 300) throw Exception('迅雷字幕接口返回 HTTP ${r.statusCode}');
+    return parseXunleiSubtitles(jsonDecode(utf8.decode(r.bodyBytes)));
   }
 
-  Future<void> loadOnlineSubtitle(OnlineSubtitle sub) async {
-    toast('正在加载在线字幕…');
+  Future<bool> loadOnlineSubtitle(OnlineSubtitle sub) async {
     try {
       final r = await _client.get(Uri.parse(sub.url)).timeout(const Duration(seconds: 20));
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        toast('下载失败 (HTTP ${r.statusCode})');
-        return;
-      }
-      if (r.bodyBytes.isEmpty) {
-        toast('字幕内容为空');
-        return;
+      if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) {
+        toast('字幕下载失败 (HTTP ${r.statusCode})');
+        return false;
       }
       // mpv detects the charset (GBK, UTF-16 ...) itself: the bytes are stored untouched
       final path = await _tempFile('${code.isEmpty ? 'subtitle' : code}.${sub.ext}', r.bodyBytes);
-      final ok = await addSubtitleFile(path, '在线: ${sub.name}');
-      toast(ok ? '在线字幕加载成功' : '在线字幕加载失败');
-    } on TimeoutException {
-      toast('下载字幕超时 (20 秒)');
-    } catch (e) {
-      toast('在线字幕加载失败: $e');
-    }
-  }
-
-  Future<void> openSubtitlecat() async {
-    if (code.isEmpty) {
-      toast('无法从片名识别番号');
-      return;
-    }
-    final ok = await launchUrl(Uri.https('www.subtitlecat.com', '/index.php', {'search': code}), mode: LaunchMode.externalApplication);
-    toast(ok ? '已在浏览器打开 Subtitlecat: $code' : '无法打开浏览器');
-  }
-
-  /// Removes the subtitles loaded from the ball (local or online).
-  Future<void> clearSubtitles() async {
-    final native = _native;
-    if (native == null || _addedSubtitles.isEmpty) {
-      toast('没有可清除的外挂字幕');
-      return;
-    }
-    try {
-      final tracks = jsonDecode(await native.getProperty('track-list'));
-      if (tracks is List) {
-        for (final t in tracks) {
-          if (t is Map && t['type'] == 'sub' && _addedSubtitles.contains(t['external-filename'])) {
-            await _command(['sub-remove', '${t['id']}']);
-          }
-        }
+      final ok = await addSubtitleFile(path, '在线 · ${sub.name}');
+      if (ok) {
+        loadedOnline.add(sub.url);
+        notifyListeners();
       }
-    } catch (_) {}
-    _addedSubtitles.clear();
-    toast('字幕已清除');
+      toast(ok ? '已加载字幕：${sub.name}' : '字幕加载失败');
+      return ok;
+    } on TimeoutException {
+      toast('下载字幕超时');
+    } catch (e) {
+      toast('字幕加载失败: $e');
+    }
+    return false;
   }
 
   @override
@@ -352,6 +297,7 @@ class JavPlayerTools extends ChangeNotifier {
     _seekTimer?.cancel();
     _reapplyTimer?.cancel();
     unawaited(_tracksSub?.cancel());
+    if (_accelerating) unawaited(player.setRate(_speedBeforeAcceleration ?? 1.0).catchError((_) {}));
     _client.close();
     message.dispose();
     super.dispose();

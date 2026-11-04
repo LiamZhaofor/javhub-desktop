@@ -45,6 +45,7 @@ class LibraryPageState extends State<LibraryPage> {
 
   Future<void> _restore() async {
     final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _sort = p.getString('lib.sort') ?? 'mtime';
       _where = p.getString('lib.where') ?? '';
@@ -122,50 +123,47 @@ class LibraryPageState extends State<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
     final base = _base();
     final view = _view(base);
     final filtered = _q.text.isNotEmpty || _where.isNotEmpty || _sub.isNotEmpty || _cat.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          child: Row(
-            children: [
-              Text('片库', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(width: 10),
-              Text(filtered ? '${view.length} / ${_all.length} 部' : '${_all.length} 部',
-                  style: TextStyle(color: Theme.of(context).hintColor)),
-              if (_loading) const Padding(padding: EdgeInsets.only(left: 10), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
-              const Spacer(),
-              SizedBox(
-                width: 280,
-                child: TextField(
-                  controller: _q,
-                  decoration: InputDecoration(
-                    hintText: '番号 / 演员 / 标题 / 标签',
-                    prefixIcon: const Icon(Icons.search, size: 18),
-                    suffixIcon: _q.text.isEmpty
-                        ? null
-                        : IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => setState(_q.clear)),
-                  ),
-                  onChanged: (_) {
-                    _debounce?.cancel();
-                    _debounce = Timer(const Duration(milliseconds: 200), () => setState(() {}));
-                  },
+        PageHeader(
+          title: '片库',
+          subtitle: filtered ? '${view.length} / ${_all.length} 部' : '${_all.length} 部',
+          trailing: _loading
+              ? const Padding(padding: EdgeInsets.only(left: 12, top: 4), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)))
+              : null,
+          actions: [
+            SizedBox(
+              width: 300,
+              child: TextField(
+                controller: _q,
+                decoration: InputDecoration(
+                  hintText: '搜索番号、演员、标题、标签',
+                  prefixIcon: Icon(Icons.search_rounded, size: 19, color: p.muted),
+                  suffixIcon: _q.text.isEmpty
+                      ? null
+                      : IconButton(icon: const Icon(Icons.close_rounded, size: 16), onPressed: () => setState(_q.clear)),
                 ),
+                onChanged: (_) {
+                  _debounce?.cancel();
+                  _debounce = Timer(const Duration(milliseconds: 200), () => setState(() {}));
+                },
               ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: '重新扫描片库',
-                onPressed: _loading ? null : () => load(rescan: true),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
+            ),
+            IconButton.outlined(
+              tooltip: '重新扫描片库',
+              onPressed: _loading ? null : () => load(rescan: true),
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+              style: IconButton.styleFrom(side: BorderSide(color: p.line), fixedSize: const Size(42, 42)),
+            ),
+          ],
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -173,79 +171,83 @@ class LibraryPageState extends State<LibraryPage> {
             children: [
               for (final c in ['', ..._categories])
                 ChoiceChip(
-                  label: Text('${c.isEmpty ? '全部' : c}  ${c.isEmpty ? base.length : base.where((it) => it.category == c).length}'),
+                  showCheckmark: false,
+                  label: Text.rich(TextSpan(children: [
+                    TextSpan(text: c.isEmpty ? '全部' : c, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    TextSpan(
+                      text: '  ${c.isEmpty ? base.length : base.where((it) => it.category == c).length}',
+                      style: TextStyle(color: p.muted, fontSize: 12),
+                    ),
+                  ])),
                   selected: _cat == c,
                   onSelected: (_) => setState(() => _cat = c),
                 ),
-              const SizedBox(width: 12),
-              _drop('位置', _where, const {'': '全部位置', 'nas': 'NAS 本地', 'cloud': '网盘'}, (v) => _where = v),
-              _drop('字幕', _sub, const {'': '字幕不限', '1': '中文字幕', '0': '无字幕'}, (v) => _sub = v),
-              _drop('排序', _sort, _sorts, (v) => _sort = v),
+              Container(width: 1, height: 22, color: p.line, margin: const EdgeInsets.symmetric(horizontal: 6)),
+              SelectBox<String>(
+                value: _where,
+                icon: Icons.place_outlined,
+                options: const {'': '全部位置', 'nas': 'NAS 本地', 'cloud': '115 网盘'},
+                onChanged: (v) => _set(() => _where = v),
+              ),
+              SelectBox<String>(
+                value: _sub,
+                icon: Icons.subtitles_outlined,
+                options: const {'': '字幕不限', '1': '中文字幕', '0': '无字幕'},
+                onChanged: (v) => _set(() => _sub = v),
+              ),
+              SelectBox<String>(value: _sort, icon: Icons.sort_rounded, options: _sorts, onChanged: (v) => _set(() => _sort = v)),
               if (filtered)
                 TextButton.icon(
-                  onPressed: () => setState(() {
+                  onPressed: () => _set(() {
                     _q.clear();
                     _where = _sub = _cat = '';
-                    unawaited(_save());
                   }),
-                  icon: const Icon(Icons.filter_alt_off, size: 16),
+                  icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
                   label: const Text('清除筛选'),
                 ),
             ],
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Expanded(
           child: _error != null && _all.isEmpty
               ? ErrorBox(_error!, onRetry: load)
               : view.isEmpty
-              ? Center(child: Text(_loading ? '加载中…' : '没有符合条件的影片', style: TextStyle(color: Theme.of(context).hintColor)))
-              : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 190,
-                    mainAxisSpacing: 18,
-                    crossAxisSpacing: 16,
-                    childAspectRatio: 0.58,
+              ? (_loading ? const Center(child: CircularProgressIndicator()) : const EmptyHint('没有符合条件的影片', icon: Icons.movie_filter_outlined))
+              : Scrollbar(
+                  child: GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 186,
+                      mainAxisSpacing: 22,
+                      crossAxisSpacing: 18,
+                      childAspectRatio: 0.565,
+                    ),
+                    itemCount: view.length,
+                    itemBuilder: (context, i) {
+                      final it = view[i];
+                      return PosterTile(
+                        image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
+                        code: it.folder,
+                        subtitle: it.shortTitle,
+                        badges: [
+                          if (it.chineseSub) const Badge2('中字'),
+                          if (it.cloud) const Badge2('115', color: badgeBlue),
+                          if (it.category.isNotEmpty && it.category != '有码') Badge2(it.category, color: badgeDark),
+                          if (it.leak) const Badge2('流出', color: badgeDark),
+                        ],
+                        onTap: () => _open(it),
+                      );
+                    },
                   ),
-                  itemCount: view.length,
-                  itemBuilder: (context, i) {
-                    final it = view[i];
-                    return PosterTile(
-                      image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
-                      code: it.folder,
-                      subtitle: it.shortTitle,
-                      badges: [
-                        if (it.chineseSub) const Badge2('中字'),
-                        if (it.cloud) const Badge2('115', color: Color(0xFF2563EB)),
-                        if (it.category.isNotEmpty && it.category != '有码') Badge2(it.category, color: Colors.black54),
-                        if (it.leak) const Badge2('流出', color: Colors.black54),
-                      ],
-                      onTap: () => _open(it),
-                    );
-                  },
                 ),
         ),
       ],
     );
   }
 
-  Widget _drop(String label, String value, Map<String, String> options, void Function(String) set) => DropdownButtonHideUnderline(
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButton<String>(
-        value: options.containsKey(value) ? value : options.keys.first,
-        isDense: true,
-        items: [for (final e in options.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-        onChanged: (v) => setState(() {
-          set(v ?? '');
-          unawaited(_save());
-        }),
-      ),
-    ),
-  );
+  void _set(VoidCallback f) {
+    setState(f);
+    unawaited(_save());
+  }
 }

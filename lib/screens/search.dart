@@ -8,7 +8,7 @@ import '../app.dart';
 import '../models.dart';
 import '../widgets.dart';
 
-const _subPolicies = {'': '字幕：默认', 'prefer': '优先中字', 'require': '只要中字', 'ignore': '不看字幕'};
+const _subPolicies = {'': '字幕默认', 'prefer': '优先中字', 'require': '只要中字', 'ignore': '不看字幕'};
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, this.onJobCreated});
@@ -118,33 +118,34 @@ class SearchPageState extends State<SearchPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const PageHeader(title: '搜索与推荐', subtitle: '按番号查影片信息和磁力，一键下载到 NAS 或 115'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 16),
           child: Row(
             children: [
-              Text('搜索', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(width: 20),
+              if (_result != null) ...[
+                IconButton.filledTonal(tooltip: '返回推荐', onPressed: () => setState(() => _result = null), icon: const Icon(Icons.arrow_back_rounded)),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: TextField(
                   controller: _q,
-                  decoration: const InputDecoration(hintText: '输入番号，如 SSIS-001', prefixIcon: Icon(Icons.search, size: 18)),
+                  style: const TextStyle(fontSize: 15),
+                  decoration: InputDecoration(
+                    hintText: '输入番号，如 SSIS-001',
+                    prefixIcon: Icon(Icons.search_rounded, size: 20, color: Palette.of(context).muted),
+                  ),
                   onSubmitted: (v) => search(v),
                 ),
               ),
-              const SizedBox(width: 8),
-              DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _policy,
-                  items: [for (final e in _subPolicies.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-                  onChanged: (v) => setState(() => _policy = v ?? ''),
-                ),
+              const SizedBox(width: 10),
+              SelectBox<String>(value: _policy, icon: Icons.subtitles_outlined, options: _subPolicies, onChanged: (v) => setState(() => _policy = v)),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: _busy ? null : () => search(_q.text),
+                icon: const Icon(Icons.search_rounded, size: 18),
+                label: const Text('搜索'),
               ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: _busy ? null : () => search(_q.text), child: const Text('搜索')),
-              if (_result != null) ...[
-                const SizedBox(width: 6),
-                IconButton(tooltip: '返回推荐', onPressed: () => setState(() => _result = null), icon: const Icon(Icons.close)),
-              ],
             ],
           ),
         ),
@@ -179,7 +180,7 @@ class SearchPageState extends State<SearchPage> {
         ? '根据片库 ${b['library']} 部${b['watched'] != null && b['watched'] != 0 ? '、最近看过 ${b['watched']} 部' : ''}${actors.isEmpty ? '' : '；偏好：$actors'}'
         : '';
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
       children: [
         Row(
           children: [
@@ -223,8 +224,8 @@ class SearchPageState extends State<SearchPage> {
                 subtitle: rec.reasons.isEmpty ? rec.title : rec.reasons.first,
                 badges: [
                   if (rec.subMagnet) const Badge2('中字磁链'),
-                  if (rec.upcoming) const Badge2('未发售', color: Colors.black54) else if (rec.wished) const Badge2('想看', color: Color(0xFF2563EB)),
-                  if (rec.rating > 0) Badge2('★ ${rec.rating.toStringAsFixed(1)}', color: Colors.black54),
+                  if (rec.upcoming) const Badge2('未发售', color: badgeDark) else if (rec.wished) const Badge2('想看', color: badgeBlue),
+                  if (rec.rating > 0) Badge2('★ ${rec.rating.toStringAsFixed(1)}', color: badgeDark),
                 ],
                 onTap: () => search(rec.code),
               );
@@ -243,7 +244,7 @@ class SearchPageState extends State<SearchPage> {
     final okBackends = _backends?.items.where((b) => b.ok).toList() ?? [];
     final offBackends = _backends?.items.where((b) => !b.ok && b.name != 'qbittorrent').map((b) => b.title).toSet() ?? {};
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
       children: [
         if (d.found)
           Card(
@@ -414,7 +415,7 @@ class SearchPageState extends State<SearchPage> {
                   const SizedBox(height: 4),
                   Wrap(spacing: 4, runSpacing: 4, children: [
                     for (final r in c.reasons)
-                      Badge2(r, color: r == '中文字幕' ? accent : (r == '4K' || r == '1080p') ? Colors.green.shade700 : Colors.white12),
+                      Badge2(r, color: r == '中文字幕' ? accent : (r == '4K' || r == '1080p') ? const Color(0xFF16A34A) : const Color(0xFF6B7280)),
                     if (rejected) Badge2(c.rejected, color: Colors.red.shade900),
                   ]),
                 ],

@@ -63,16 +63,9 @@ class _WishlistPageState extends State<WishlistPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const PageHeader(title: '想看', subtitle: '定期自动搜索，出现资源后自动下载（可选只等中字版）'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-          child: Row(children: [
-            Text('想看', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 12),
-            Text('定期自动搜索，出现资源后自动下载（可选只等中字版）', style: TextStyle(color: hint, fontSize: 12)),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
           child: Row(children: [
             SizedBox(
               width: 260,
@@ -88,9 +81,9 @@ class _WishlistPageState extends State<WishlistPage> {
           child: items == null
               ? (_error != null ? ErrorBox(_error!, onRetry: _load) : const Center(child: CircularProgressIndicator()))
               : items.isEmpty
-              ? Center(child: Text('清单为空。搜索结果页可一键加入。', style: TextStyle(color: hint)))
+              ? const EmptyHint('清单为空，搜索结果页可一键加入', icon: Icons.favorite_border_rounded)
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(28, 4, 28, 32),
                   itemCount: items.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, i) {
@@ -102,7 +95,7 @@ class _WishlistPageState extends State<WishlistPage> {
                         const SizedBox(width: 8),
                         if (w.needSub) const Badge2('只要中字'),
                         const SizedBox(width: 6),
-                        Badge2(status, color: w.status == 'done' ? Colors.green.shade700 : w.status == 'queued' ? Colors.orange.shade800 : Colors.white12),
+                        Badge2(status, color: w.status == 'done' ? const Color(0xFF16A34A) : w.status == 'queued' ? const Color(0xFFD97706) : const Color(0xFF6B7280)),
                       ]),
                       subtitle: Text('${w.lastResult.isEmpty ? '尚未检查' : w.lastResult}${w.lastCheck > 0 ? ' · ${fmtAgo(w.lastCheck)}' : ''}'),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [

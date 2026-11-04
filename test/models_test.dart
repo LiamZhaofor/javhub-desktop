@@ -76,5 +76,9 @@ void main() {
     expect(subs.single.duration, const Duration(milliseconds: 8988845));
     expect(subs.single.label, 'SSIS-469.srt (（网友上传）)');
     expect(parseXunleiSubtitles({'code': 1}), isEmpty);
+    // "推荐": made for a video of (about) this length
+    expect(subs.single.fits(const Duration(hours: 2, minutes: 29, seconds: 50)), isTrue);
+    expect(subs.single.fits(const Duration(hours: 2)), isFalse);
+    expect(subs.single.fits(Duration.zero), isFalse);
   });
 }

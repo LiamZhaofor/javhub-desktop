@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -59,99 +60,147 @@ class _DetailPageState extends State<DetailPage> {
     ));
   }
 
-  Widget _link(String text, String query) => ActionChip(
+  Widget _chip(String text, {IconData? icon}) => ActionChip(
+    avatar: icon == null ? null : Icon(icon, size: 15),
     label: Text(text),
-    onPressed: widget.onFilter == null ? null : () => widget.onFilter!(query),
+    onPressed: widget.onFilter == null ? null : () => widget.onFilter!(text),
   );
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    final info = <(String, Widget)>[
-      ('番号', SelectableText(it.code)),
-      ('发行', Text(it.date.isEmpty ? '-' : it.date)),
-      ('演员', it.actors.isEmpty ? const Text('-') : Wrap(spacing: 6, runSpacing: 6, children: [for (final a in it.actors) _link(a, a)])),
-      ('片商', it.studio.isEmpty ? const Text('-') : Wrap(children: [_link(it.studio, it.studio)])),
-      if (it.series.isNotEmpty) ('系列', Wrap(children: [_link(it.series, it.series)])),
-      ('分类', Text([it.category, if (it.leak) '流出/破解', if (it.chineseSub) '中字'].where((s) => s.isNotEmpty).join(' · '))),
-      ('位置', Text(it.cloud ? '115 网盘  ${it.sources.isEmpty ? '' : it.sources.first}' : 'NAS 本地 · ${fmtSize(it.size)}')),
+    final p = Palette.of(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final cover = it.fanart
+        ? App.api.media(it.id, 'fanart.jpg', width: 900, version: it.posterVersion)
+        : (it.poster ? App.api.media(it.id, 'poster.jpg', width: 480, version: it.posterVersion) : '');
+    final facts = <(IconData, String)>[
+      if (it.date.isNotEmpty) (Icons.event_outlined, it.date),
+      if (it.category.isNotEmpty) (Icons.category_outlined, [it.category, if (it.leak) '流出'].join(' · ')),
+      if (it.chineseSub) (Icons.subtitles_outlined, '中文字幕'),
+      it.cloud ? (Icons.cloud_outlined, '115 网盘') : (Icons.storage_outlined, 'NAS · ${fmtSize(it.size)}'),
     ];
     return Scaffold(
-      appBar: AppBar(title: Text(it.folder)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-        children: [
-          LayoutBuilder(builder: (context, c) {
-            final wide = c.maxWidth > 900;
-            final cover = ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: AspectRatio(
-                aspectRatio: it.fanart ? 1.5 : 0.7,
-                child: NetImage(
-                  it.fanart
-                      ? App.api.media(it.id, 'fanart.jpg', width: 900, version: it.posterVersion)
-                      : (it.poster ? App.api.media(it.id, 'poster.jpg', width: 480, version: it.posterVersion) : ''),
-                  fit: BoxFit.cover,
-                ),
-              ),
-            );
-            final text = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Stack(
               children: [
-                SelectableText(it.title.isEmpty ? it.code : it.title,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 14),
-                for (final (k, v) in info)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(width: 48, child: Padding(padding: const EdgeInsets.only(top: 2), child: Text(k, style: TextStyle(color: hint)))),
-                        Expanded(child: v),
-                      ],
+                // blurred artwork behind the header, fading into the page
+                Positioned.fill(
+                  child: ClipRect(
+                    child: ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                      child: Opacity(opacity: dark ? 0.55 : 0.35, child: NetImage(cover, decodeWidth: 300)),
                     ),
                   ),
-                if (it.tags.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Wrap(spacing: 6, runSpacing: 6, children: [for (final t in it.tags) _link(t, t)]),
-                ],
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (var i = 0; i < it.videos.length; i++)
-                      FilledButton.icon(
-                        onPressed: () => _play(i),
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(it.videos.length > 1 ? '播放 ${i + 1}' : '播放'),
+                ),
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [p.bg.withValues(alpha: 0.35), p.bg],
                       ),
-                    OutlinedButton.icon(
-                      onPressed: widget.onSearch == null ? null : () => widget.onSearch!(it.code),
-                      icon: const Icon(Icons.travel_explore),
-                      label: const Text('查找其它版本'),
                     ),
-                  ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 32, 28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      IconButton.filledTonal(
+                        tooltip: '返回',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      const SizedBox(height: 14),
+                      LayoutBuilder(builder: (context, c) {
+                        final wide = c.maxWidth > 920;
+                        final art = Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 30, offset: Offset(0, 12))],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: AspectRatio(aspectRatio: it.fanart ? 1.5 : 0.7, child: NetImage(cover)),
+                          ),
+                        );
+                        final info = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(it.code, style: const TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: 0.5)),
+                            const SizedBox(height: 6),
+                            SelectableText(it.title.isEmpty ? it.code : it.title,
+                                style: TextStyle(fontSize: 22, height: 1.35, fontWeight: FontWeight.w800, color: p.text)),
+                            const SizedBox(height: 14),
+                            Wrap(spacing: 16, runSpacing: 8, children: [
+                              for (final (icon, text) in facts)
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                                  Icon(icon, size: 16, color: p.muted),
+                                  const SizedBox(width: 5),
+                                  Text(text, style: TextStyle(color: p.muted)),
+                                ]),
+                            ]),
+                            const SizedBox(height: 22),
+                            Wrap(spacing: 10, runSpacing: 10, children: [
+                              for (var i = 0; i < it.videos.length; i++)
+                                FilledButton.icon(
+                                  onPressed: () => _play(i),
+                                  icon: const Icon(Icons.play_arrow_rounded),
+                                  label: Text(it.videos.length > 1 ? '播放 ${i + 1}' : '播放'),
+                                ),
+                              OutlinedButton.icon(
+                                onPressed: widget.onSearch == null ? null : () => widget.onSearch!(it.code),
+                                icon: const Icon(Icons.travel_explore_rounded, size: 18),
+                                label: const Text('查找其它版本'),
+                              ),
+                            ]),
+                            const SizedBox(height: 24),
+                            if (it.actors.isNotEmpty) _section('演员', [for (final a in it.actors) _chip(a, icon: Icons.person_outline)]),
+                            if (it.studio.isNotEmpty || it.series.isNotEmpty)
+                              _section('片商 / 系列', [if (it.studio.isNotEmpty) _chip(it.studio), if (it.series.isNotEmpty) _chip(it.series)]),
+                            if (it.tags.isNotEmpty) _section('标签', [for (final t in it.tags) _chip(t)]),
+                          ],
+                        );
+                        return wide
+                            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                SizedBox(width: c.maxWidth * 0.5, child: art),
+                                const SizedBox(width: 32),
+                                Expanded(child: info),
+                              ])
+                            : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [art, const SizedBox(height: 22), info]);
+                      }),
+                    ],
+                  ),
                 ),
               ],
-            );
-            return wide
-                ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    SizedBox(width: c.maxWidth * 0.52, child: cover),
-                    const SizedBox(width: 28),
-                    Expanded(child: text),
-                  ])
-                : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [cover, const SizedBox(height: 20), text]);
-          }),
-          if (_plot.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Text('简介', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 6),
-            SelectableText(_plot, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.6)),
-          ],
+            ),
+          ),
+          if (_plot.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(32, 0, 32, 40),
+              sliver: SliverToBoxAdapter(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('简介', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.text)),
+                  const SizedBox(height: 8),
+                  SelectableText(_plot, style: TextStyle(color: p.muted, height: 1.75, fontSize: 14)),
+                ]),
+              ),
+            ),
         ],
       ),
     );
   }
+
+  Widget _section(String title, List<Widget> chips) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: TextStyle(color: Palette.of(context).muted, fontSize: 12, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 6),
+      Wrap(spacing: 6, runSpacing: 6, children: chips),
+    ]),
+  );
 }

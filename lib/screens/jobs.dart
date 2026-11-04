@@ -64,21 +64,18 @@ class _JobsPageState extends State<JobsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          child: Row(children: [
-            Text('任务', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-            const Spacer(),
-            IconButton(tooltip: '刷新', onPressed: _poll, icon: const Icon(Icons.refresh)),
-          ]),
+        PageHeader(
+          title: '下载任务',
+          subtitle: jobs == null ? null : '${jobs.where((j) => j.active).length} 个进行中 · 共 ${jobs.length} 个',
+          actions: [IconButton.outlined(tooltip: '刷新', onPressed: _poll, icon: const Icon(Icons.refresh_rounded, size: 20))],
         ),
         Expanded(
           child: jobs == null
               ? (_error != null ? ErrorBox(_error!, onRetry: _poll) : const Center(child: CircularProgressIndicator()))
               : jobs.isEmpty
-              ? Center(child: Text('还没有任务。去「搜索」输入番号开始。', style: TextStyle(color: hint)))
+              ? const EmptyHint('还没有任务，去「搜索与推荐」输入番号开始', icon: Icons.download_outlined)
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(28, 4, 28, 32),
                   itemCount: jobs.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
@@ -141,7 +138,7 @@ class _JobsPageState extends State<JobsPage> {
                               Container(
                                 margin: const EdgeInsets.only(top: 10),
                                 padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(6)),
+                                decoration: BoxDecoration(color: Palette.of(context).raised, borderRadius: BorderRadius.circular(8)),
                                 child: SelectableText(
                                   j.log.map((e) {
                                     final t = DateTime.fromMillisecondsSinceEpoch((e.$1 * 1000).round());
