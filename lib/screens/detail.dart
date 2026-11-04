@@ -9,6 +9,7 @@ import '../models.dart';
 import '../platform.dart';
 import '../player/player_page.dart';
 import '../widgets.dart';
+import 'actor.dart';
 
 /// Opens a movie's page; its actress / tag links filter the library, 查找其它版本 searches.
 Future<void> openDetail(BuildContext context, LibraryItem it) => Navigator.of(context).push(MaterialPageRoute(
@@ -105,11 +106,113 @@ class _DetailPageState extends State<DetailPage> {
     )).then((_) => Future<void>.delayed(const Duration(milliseconds: 600), _loadProgress));
   }
 
-  Widget _chip(String text, {IconData? icon}) => ActionChip(
+  Widget _chip(String text, {IconData? icon, VoidCallback? onTap}) => ActionChip(
     avatar: icon == null ? null : Icon(icon, size: 15),
     label: Text(text),
-    onPressed: widget.onFilter == null ? null : () => widget.onFilter!(text),
+    onPressed: onTap ?? (widget.onFilter == null ? null : () => widget.onFilter!(text)),
   );
+
+  // ---------------- marks ----------------
+  Future<void> _mark(Map<String, Object?> patch) async {
+    try {
+      final m = await App.api.setMark(it.code, patch);
+      if (mounted) setState(() => it.applyMarks(m));
+    } catch (e) {
+      if (mounted) toast(context, '$e');
+    }
+  }
+
+  Widget _marks(Palette p) => Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+    it.fav
+        ? FilledButton.tonalIcon(
+            onPressed: () => _mark({'fav': false}),
+            icon: const Icon(Icons.favorite_rounded, color: accent, size: 18),
+            label: const Text('已收藏'),
+          )
+        : OutlinedButton.icon(onPressed: () => _mark({'fav': true}), icon: const Icon(Icons.favorite_border_rounded, size: 18), label: const Text('收藏')),
+    Tooltip(
+      message: '我的评分（再点一次取消）',
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        for (var n = 1; n <= 5; n++)
+          InkResponse(
+            radius: 18,
+            onTap: () => _mark({'rating': n == it.rating ? 0 : n}),
+            child: Padding(
+              padding: const EdgeInsets.all(1),
+              child: Icon(n <= it.rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 27, color: n <= it.rating ? const Color(0xFFF5B301) : p.muted),
+            ),
+          ),
+      ]),
+    ),
+    Tooltip(
+      message: it.watchedSet ? '手动标记' : '自动：看到片尾就算看过',
+      child: it.watched
+          ? FilledButton.tonalIcon(
+              onPressed: () => _mark({'watched': false}),
+              icon: const Icon(Icons.check_circle_rounded, size: 18),
+              label: const Text('已看'),
+            )
+          : OutlinedButton.icon(onPressed: () => _mark({'watched': true}), icon: const Icon(Icons.visibility_outlined, size: 18), label: const Text('未看')),
+    ),
+    if (it.watchedSet) TextButton(onPressed: () => _mark({'watched': null}), child: const Text('恢复自动')),
+  ]);
+
+  // ---------------- fixing the movie ----------------
+  Future<void> _manage(String act) async {
+    Object? body;
+    if (act == 'recode') {
+      final code = await _askCode();
+      if (code == null) return;
+      body = {'code': code};
+    } else if (act == 'remove') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('从片库移除 ${it.folder}？'),
+          content: Text(it.cloud ? '网盘里的文件不会删除，只是不再出现在片库和 Emby 里，之后同步也不会再加回来。' : '影片文件夹会移到片库的 .trash 目录，需要时可以手动移回。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('移除')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      final r = await App.api.manage(it.id, act, body);
+      if (!mounted) return;
+      toast(context, switch (act) {
+        'remove' => '${r['message'] ?? '已移除'}',
+        'recode' => '已改为 ${r['code']}，正在重新刮削，几分钟后封面和资料会出现',
+        _ => '已清除旧资料，正在重新刮削，几分钟后可见',
+      });
+      Shell.refresh();
+      Navigator.of(context).maybePop();
+    } catch (e) {
+      if (mounted) toast(context, '$e');
+    }
+  }
+
+  Future<String?> _askCode() {
+    final c = TextEditingController(text: it.code);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('改番号'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${it.folder} 的正确番号，改完会重新刮削', style: TextStyle(color: Palette.of(ctx).muted, fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(controller: c, autofocus: true, decoration: const InputDecoration(hintText: '例如 SSIS-001'),
+              onSubmitted: (v) => Navigator.pop(ctx, v.trim())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+        ],
+      ),
+    ).then((v) => v == null || v.isEmpty ? null : v);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -155,11 +258,25 @@ class _DetailPageState extends State<DetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton.filledTonal(
-                        tooltip: '返回',
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.arrow_back_rounded),
-                      ),
+                      Row(children: [
+                        IconButton.filledTonal(
+                          tooltip: '返回',
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(Icons.arrow_back_rounded),
+                        ),
+                        const Spacer(),
+                        PopupMenuButton<String>(
+                          tooltip: '管理这部影片',
+                          icon: const Icon(Icons.more_horiz_rounded),
+                          style: IconButton.styleFrom(backgroundColor: p.raised.withValues(alpha: 0.7)),
+                          onSelected: _manage,
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'rescrape', child: ListTile(leading: Icon(Icons.auto_fix_high_rounded), title: Text('重新刮削'), subtitle: Text('清除封面和资料重新获取'))),
+                            PopupMenuItem(value: 'recode', child: ListTile(leading: Icon(Icons.edit_rounded), title: Text('改番号…'), subtitle: Text('番号认错了'))),
+                            PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.remove_circle_outline_rounded, color: accent), title: Text('从片库移除'))),
+                          ],
+                        ),
+                      ]),
                       const SizedBox(height: 14),
                       LayoutBuilder(builder: (context, c) {
                         final wide = c.maxWidth > 920;
@@ -180,6 +297,8 @@ class _DetailPageState extends State<DetailPage> {
                             const SizedBox(height: 6),
                             SelectableText(it.title.isEmpty ? it.code : it.title,
                                 style: TextStyle(fontSize: 22, height: 1.35, fontWeight: FontWeight.w800, color: p.text)),
+                            const SizedBox(height: 14),
+                            _marks(p),
                             const SizedBox(height: 14),
                             Wrap(spacing: 16, runSpacing: 8, children: [
                               for (final (icon, text) in facts)
@@ -214,7 +333,7 @@ class _DetailPageState extends State<DetailPage> {
                               ),
                             ]),
                             const SizedBox(height: 24),
-                            if (it.actors.isNotEmpty) _section('演员', [for (final a in it.actors) _chip(a, icon: Icons.person_outline)]),
+                            if (it.actors.isNotEmpty) _section('演员', [for (final a in it.actors) _chip(a, icon: Icons.person_outline, onTap: () => openActor(context, a))]),
                             if (it.studio.isNotEmpty || it.series.isNotEmpty)
                               _section('片商 / 系列', [if (it.studio.isNotEmpty) _chip(it.studio), if (it.series.isNotEmpty) _chip(it.series)]),
                             if (it.tags.isNotEmpty) _section('标签', [for (final t in it.tags) _chip(t)]),

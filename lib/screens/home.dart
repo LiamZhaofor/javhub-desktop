@@ -189,6 +189,7 @@ class HomePageState extends State<HomePage> {
       if (it.chineseSub) const Badge2('中字'),
       if (it.cloud) const Badge2('115', color: badgeBlue),
     ],
+    corner: markBadges(it),
     onTap: () => _open(it),
   );
 }

@@ -102,4 +102,24 @@ void main() {
     expect(it.progress!.fraction, 0.5);
     expect(parseProgress({}), isEmpty);
   });
+
+  test('marks come with a movie and change in place', () {
+    final it = LibraryItem.fromJson({'id': 'a', 'code': 'A', 'folder': 'A', 'fav': true, 'rating': 4, 'watched': false});
+    expect([it.fav, it.rating, it.watched, it.watchedSet], [true, 4, false, false]);
+    it.applyMarks({'fav': false, 'rating': 0, 'watched': true, 'watched_set': true});
+    expect([it.fav, it.rating, it.watched, it.watchedSet], [false, 0, true, true]);
+    expect(LibraryItem.fromJson({'id': 'b', 'code': 'B', 'folder': 'B'}).rating, 0);
+  });
+
+  test('actress page', () {
+    final a = ActorInfo({
+      'name': '三上悠亚', 'jname': '三上悠亞', 'aid': 'abc', 'followed': true, 'updated': 1.0, 'error': '', 'note': '',
+      'items': [{'id': 'SSIS-001', 'code': 'SSIS-001', 'folder': 'SSIS-001'}],
+      'works': [{'code': 'SSIS-001', 'in_library': 'SSIS-001'}, {'code': 'SSIS-900', 'in_library': null, 'rating': 4.2, 'wished': true}],
+    });
+    expect(a.items.single.code, 'SSIS-001');
+    expect(a.works.map((w) => w.inLibrary).toList(), ['SSIS-001', null]);
+    expect(a.works.last.rating, 4.2);
+    expect(a.works.last.wished && a.followed, isTrue);
+  });
 }

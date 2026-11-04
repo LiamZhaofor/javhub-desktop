@@ -10,7 +10,16 @@ import '../widgets.dart';
 import 'detail.dart';
 
 const _categories = ['有码', '无码', '素人', 'FC2'];
-const _sorts = {'mtime': '最近入库', 'date': '发行日期', 'code': '番号', 'actor': '演员'};
+const _sorts = {'mtime': '最近入库', 'date': '发行日期', 'code': '番号', 'actor': '演员', 'rating': '我的评分'};
+const _marks = {'': '标记不限', 'fav': '♥ 收藏', 'unwatched': '未看', 'watched': '已看', 'rated': '已评分'};
+
+bool _markOk(LibraryItem it, String m) => switch (m) {
+  'fav' => it.fav,
+  'unwatched' => !it.watched,
+  'watched' => it.watched,
+  'rated' => it.rating > 0,
+  _ => true,
+};
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
@@ -29,6 +38,7 @@ class LibraryPageState extends State<LibraryPage> {
   String _where = ''; // '' | nas | cloud
   String _sub = ''; // '' | 1 | 0
   String _sort = 'mtime';
+  String _mark = ''; // '' | fav | unwatched | watched | rated
   final _scroll = ScrollController();
 
   /// Back to the top (片库 tapped again on a phone).
@@ -58,6 +68,7 @@ class LibraryPageState extends State<LibraryPage> {
       _sort = p.getString('lib.sort') ?? 'mtime';
       _where = p.getString('lib.where') ?? '';
       _sub = p.getString('lib.sub') ?? '';
+      _mark = p.getString('lib.mark') ?? '';
     });
   }
 
@@ -66,6 +77,7 @@ class LibraryPageState extends State<LibraryPage> {
     await p.setString('lib.sort', _sort);
     await p.setString('lib.where', _where);
     await p.setString('lib.sub', _sub);
+    await p.setString('lib.mark', _mark);
   }
 
   void setQuery(String q) {
@@ -97,7 +109,7 @@ class LibraryPageState extends State<LibraryPage> {
     final q = _q.text.trim();
     return _all
         .where(
-          (it) => (_where.isEmpty || (_where == 'cloud') == it.cloud) && (_sub.isEmpty || (_sub == '1') == it.chineseSub) && it.matches(q),
+          (it) => (_where.isEmpty || (_where == 'cloud') == it.cloud) && (_sub.isEmpty || (_sub == '1') == it.chineseSub) && _markOk(it, _mark) && it.matches(q),
         )
         .toList();
   }
@@ -108,20 +120,24 @@ class LibraryPageState extends State<LibraryPage> {
       'date' => b.date.compareTo(a.date),
       'code' => a.code.compareTo(b.code),
       'actor' => (a.actors.isEmpty ? '￿' : a.actors.first).compareTo(b.actors.isEmpty ? '￿' : b.actors.first),
+      'rating' => b.rating != a.rating ? b.rating.compareTo(a.rating) : b.mtime.compareTo(a.mtime),
       _ => b.mtime.compareTo(a.mtime),
     };
     v.sort(cmp);
     return v;
   }
 
-  void _open(LibraryItem it) => openDetail(context, it);
+  // marks set on the movie's page change the item in place: show them on the way back
+  void _open(LibraryItem it) => openDetail(context, it).then((_) {
+    if (mounted) setState(() {});
+  });
 
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
     final base = _base();
     final view = _view(base);
-    final filtered = _q.text.isNotEmpty || _where.isNotEmpty || _sub.isNotEmpty || _cat.isNotEmpty;
+    final filtered = _q.text.isNotEmpty || _where.isNotEmpty || _sub.isNotEmpty || _mark.isNotEmpty || _cat.isNotEmpty;
     final header = PageHeader(
       title: '片库',
       subtitle: filtered ? '${view.length} / ${_all.length} 部' : '${_all.length} 部',
@@ -200,12 +216,13 @@ class LibraryPageState extends State<LibraryPage> {
             options: const {'': '字幕不限', '1': '中文字幕', '0': '无字幕'},
             onChanged: (v) => _set(() => _sub = v),
           ),
+          SelectBox<String>(value: _mark, icon: Icons.bookmark_border_rounded, options: _marks, onChanged: (v) => _set(() => _mark = v)),
           SelectBox<String>(value: _sort, icon: Icons.sort_rounded, options: _sorts, onChanged: (v) => _set(() => _sort = v)),
           if (filtered)
             TextButton.icon(
               onPressed: () => _set(() {
                 _q.clear();
-                _where = _sub = _cat = '';
+                _where = _sub = _cat = _mark = '';
               }),
               icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
               label: const Text('清除筛选'),
@@ -237,6 +254,7 @@ class LibraryPageState extends State<LibraryPage> {
           if (it.category.isNotEmpty && it.category != '有码') Badge2(it.category, color: badgeDark),
           if (it.leak) const Badge2('流出', color: badgeDark),
         ],
+        corner: markBadges(it),
         onTap: () => _open(it),
       );
     }

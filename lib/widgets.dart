@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'app.dart';
+import 'models.dart';
 import 'theme.dart';
 
 export 'theme.dart' show accent, Palette, PageHeader;
@@ -106,10 +107,11 @@ class ImageStore {
 }
 
 class NetImage extends StatefulWidget {
-  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth});
+  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth, this.alignment = Alignment.center});
 
   final String url;
   final BoxFit fit;
+  final Alignment alignment;
   final int? decodeWidth;
 
   @override
@@ -162,6 +164,7 @@ class _NetImageState extends State<NetImage> {
     return Image.memory(
       b,
       fit: widget.fit,
+      alignment: widget.alignment,
       gaplessPlayback: true,
       cacheWidth: widget.decodeWidth,
       frameBuilder: (context, child, frame, sync) {
@@ -199,12 +202,27 @@ const badgeBlue = Color(0xFF2563EB);
 
 /// One movie in a grid: poster with badges, then code and title.
 class PosterTile extends StatefulWidget {
-  const PosterTile({super.key, required this.image, required this.code, required this.subtitle, this.badges = const [], this.onTap});
+  const PosterTile({
+    super.key,
+    required this.image,
+    required this.code,
+    required this.subtitle,
+    this.badges = const [],
+    this.corner = const [],
+    this.cover = false,
+    this.onTap,
+  });
 
   final String image;
   final String code;
   final String subtitle;
   final List<Widget> badges;
+
+  /// Lower right: my marks (♥ ★ 已看).
+  final List<Widget> corner;
+
+  /// A JavDB cover: the whole sleeve, of which the right half is the front.
+  final bool cover;
   final VoidCallback? onTap;
 
   @override
@@ -247,8 +265,10 @@ class _PosterTileState extends State<PosterTile> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      NetImage(widget.image, decodeWidth: 360),
+                      NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center),
                       Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
+                      if (widget.corner.isNotEmpty)
+                        Positioned(right: 7, bottom: 7, child: Row(mainAxisSize: MainAxisSize.min, spacing: 3, children: widget.corner)),
                     ],
                   ),
                 ),
@@ -396,4 +416,25 @@ class StatusBarGlass extends StatelessWidget {
       ),
     );
   }
+}
+
+/// ♥ / ★n / 已看 for a poster's corner.
+List<Widget> markBadges(LibraryItem it) => [
+  if (it.fav) const _Mark('♥', color: Color(0xFFFF5A62)),
+  if (it.rating > 0) _Mark('★${it.rating}'),
+  if (it.watched) const _Mark('已看'),
+];
+
+class _Mark extends StatelessWidget {
+  const _Mark(this.text, {this.color = Colors.white});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+    decoration: BoxDecoration(color: const Color(0xA6000000), borderRadius: BorderRadius.circular(9)),
+    child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, height: 1.35)),
+  );
 }

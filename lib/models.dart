@@ -39,6 +39,10 @@ class LibraryItem {
     this.stills = const [],
     this.watchedAt = 0,
     this.progress,
+    this.fav = false,
+    this.rating = 0,
+    this.watched = false,
+    this.watchedSet = false,
   });
 
   factory LibraryItem.fromJson(Map<String, dynamic> j) => LibraryItem(
@@ -67,6 +71,10 @@ class LibraryItem {
     stills: _ls(j['stills']),
     watchedAt: _d(j['watched_at']),
     progress: j['progress'] is Map ? Progress.fromJson(_m(j['progress'])) : null,
+    fav: _b(j['fav']),
+    rating: _i(j['rating']),
+    watched: _b(j['watched']),
+    watchedSet: _b(j['watched_set']),
   );
 
   final String id;
@@ -100,6 +108,19 @@ class LibraryItem {
 
   /// How far it was watched, on any device (home page).
   final Progress? progress;
+
+  // My marks, shared by every copy with this code; changed in place when set.
+  bool fav;
+  int rating; // 0 .. 5
+  bool watched; // set by hand, or played to the end
+  bool watchedSet;
+
+  void applyMarks(Map<String, dynamic> m) {
+    fav = _b(m['fav']);
+    rating = _i(m['rating']);
+    watched = _b(m['watched']);
+    watchedSet = _b(m['watched_set']);
+  }
 
   /// The title without the code it usually starts with; the actresses when
   /// there is no title (as under the web library's tiles).
@@ -401,4 +422,36 @@ Map<int, Progress> parseProgress(Map<String, dynamic> j) {
       if (e.value is Map && int.tryParse('${e.key}') != null)
         int.parse('${e.key}'): Progress.fromJson((e.value as Map).cast<String, dynamic>(), part: int.parse('${e.key}')),
   };
+}
+
+/// An actress page: her movies in the library and her filmography on JavDB.
+class ActorInfo {
+  ActorInfo(this.j)
+    : items = [for (final x in (j['items'] as List? ?? const [])) LibraryItem.fromJson(_m(x))],
+      works = [for (final x in (j['works'] as List? ?? const [])) ActorWork(_m(x))];
+
+  final Map<String, dynamic> j;
+  final List<LibraryItem> items;
+  final List<ActorWork> works;
+  String get name => _s(j['name']);
+  String get jname => _s(j['jname']);
+  String get aid => _s(j['aid']);
+  bool get followed => _b(j['followed']);
+  double get updated => _d(j['updated']);
+  String get error => _s(j['error']);
+  String get note => _s(j['note']);
+}
+
+class ActorWork {
+  ActorWork(this.j);
+
+  final Map<String, dynamic> j;
+  String get code => _s(j['code']);
+  String get title => _s(j['title']);
+  String get cover => _s(j['cover']);
+  String get date => _s(j['date']);
+  double get rating => _d(j['rating']);
+  String get magnet => _s(j['magnet']);
+  String? get inLibrary => j['in_library'] == null ? null : _s(j['in_library']);
+  bool get wished => _b(j['wished']);
 }

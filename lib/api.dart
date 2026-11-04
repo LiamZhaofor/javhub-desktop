@@ -231,6 +231,24 @@ class JavHubApi {
 
   Future<Trickplay> trickplay(String id) async => Trickplay(await get('/api/trickplay/${Uri.encodeComponent(id)}'));
 
+  // ---------------- library management ----------------
+
+  Future<Map<String, dynamic>> _put(String path, Object body) => _send(() => _http.put(uri(path),
+      headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)));
+
+  /// 收藏 / 评分 / 已看 (null = automatic again) of a movie, by code.
+  Future<Map<String, dynamic>> setMark(String code, Map<String, Object?> patch) =>
+      _put('/api/marks/${Uri.encodeComponent(code)}', patch);
+
+  /// rescrape | recode (body {code}) | remove
+  Future<Map<String, dynamic>> manage(String id, String action, [Object? body]) =>
+      post('/api/library/${Uri.encodeComponent(id)}/$action', body);
+
+  Future<ActorInfo> actor(String name, {bool refresh = false}) async =>
+      ActorInfo(await get('/api/actors/${Uri.encodeComponent(name)}', refresh ? {'refresh': '1'} : null));
+
+  Future<void> follow(String name, bool on) => _put('/api/actors/${Uri.encodeComponent(name)}/follow', {'on': on});
+
   // ---------------- recommendations / wishlist ----------------
 
   Future<Recs> recs({bool refresh = false}) async =>

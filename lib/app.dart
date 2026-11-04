@@ -218,10 +218,18 @@ class Shell extends StatefulWidget {
   final VoidCallback onLogout;
 
   /// Switches to the search page with a code (e.g. 查找其它版本).
-  static void search(BuildContext context, String code) => context.findAncestorStateOfType<_ShellState>()?._openSearch(code);
+  static void search(BuildContext context, String code) => (context.findAncestorStateOfType<_ShellState>() ?? _ShellState._current)?._openSearch(code);
 
   /// Switches to the library, filtered by an actress / studio / tag.
-  static void filterLibrary(BuildContext context, String query) => context.findAncestorStateOfType<_ShellState>()?._openLibrary(query);
+  static void filterLibrary(BuildContext context, String query) =>
+      (context.findAncestorStateOfType<_ShellState>() ?? _ShellState._current)?._openLibrary(query);
+
+  /// The library and the home page fetch the list again (a movie was fixed / removed).
+  static void refresh() {
+    final s = _ShellState._current;
+    unawaited(s?._libraryKey.currentState?.load());
+    unawaited(s?._homeKey.currentState?.reload());
+  }
 
   @override
   State<Shell> createState() => _ShellState();
@@ -255,9 +263,13 @@ class _ShellState extends State<Shell> {
   int _activeJobs = 0;
   Timer? _jobsTimer;
 
+  /// The shell on screen: pages pushed over it (a movie, an actress) are not below it.
+  static _ShellState? _current;
+
   @override
   void initState() {
     super.initState();
+    _current = this;
     unawaited(_pollJobs());
     // a newer build on JavHub? asked once a start, a little after it
     Future<void>.delayed(const Duration(seconds: 4), () {
@@ -267,6 +279,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    if (_current == this) _current = null;
     _jobsTimer?.cancel();
     super.dispose();
   }
