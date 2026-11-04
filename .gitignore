@@ -7,3 +7,4 @@ macos/
 .flutter-plugins-dependencies
 .idea/
 *.iml
+dist/

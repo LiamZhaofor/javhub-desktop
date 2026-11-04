@@ -43,23 +43,31 @@ jobs:
           cache: true
       - name: Build
         run: flutter build windows --release
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
       - name: Package
         shell: pwsh
         run: |
           $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
           $zip = "JavHub-Windows-v$version.zip"
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath $zip
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer\javhub.iss
+          $setup = (Get-ChildItem dist -Filter "JavHub-Setup-*.exe" | Select-Object -First 1).FullName
           "ZIP=$zip" >> $env:GITHUB_ENV
+          "SETUP=$setup" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@v4
         with:
           name: javhub-windows
-          path: ${{ env.ZIP }}
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.SETUP }}
           if-no-files-found: error
       - name: Publish "latest" pre-release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "JavHub Windows 客户端自动构建（提交 ${{ github.sha }}）。下载 zip，解压后运行 JavHub.exe。"
+          $notes = "JavHub Windows 客户端自动构建（提交 ${{ github.sha }}）。下载 JavHub-Setup 安装（无需管理员权限，会建开始菜单和桌面快捷方式），或下载 zip 解压即用。"
           gh release delete latest --yes --cleanup-tag 2>$null
-          gh release create latest $env:ZIP --prerelease --target ${{ github.sha }} --title "JavHub Windows 最新构建" --notes $notes
+          gh release create latest $env:SETUP $env:ZIP --prerelease --target ${{ github.sha }} --title "JavHub Windows 最新构建" --notes $notes

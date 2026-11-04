@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'screens/home.dart';
 import 'screens/jobs.dart';
 import 'screens/library.dart';
 import 'screens/search.dart';
@@ -195,6 +196,10 @@ class Shell extends StatefulWidget {
   static void search(BuildContext context, String code) =>
       context.findAncestorStateOfType<_ShellState>()?._openSearch(code);
 
+  /// Switches to the library, filtered by an actress / studio / tag.
+  static void filterLibrary(BuildContext context, String query) =>
+      context.findAncestorStateOfType<_ShellState>()?._openLibrary(query);
+
   @override
   State<Shell> createState() => _ShellState();
 }
@@ -208,6 +213,7 @@ class _NavItem {
 }
 
 const _nav = [
+  _NavItem(Icons.home_outlined, Icons.home_rounded, '首页'),
   _NavItem(Icons.video_library_outlined, Icons.video_library_rounded, '片库'),
   _NavItem(Icons.search_rounded, Icons.saved_search_rounded, '搜索与推荐'),
   _NavItem(Icons.download_outlined, Icons.download_rounded, '下载任务'),
@@ -218,6 +224,8 @@ const _nav = [
 class _ShellState extends State<Shell> {
   int _tab = 0;
   final _searchKey = GlobalKey<SearchPageState>();
+  final _libraryKey = GlobalKey<LibraryPageState>();
+  final _homeKey = GlobalKey<HomePageState>();
   int _activeJobs = 0;
   Timer? _jobsTimer;
 
@@ -244,15 +252,21 @@ class _ShellState extends State<Shell> {
   }
 
   void _openSearch(String code) {
-    setState(() => _tab = 1);
+    setState(() => _tab = 2);
     WidgetsBinding.instance.addPostFrameCallback((_) => _searchKey.currentState?.search(code));
+  }
+
+  void _openLibrary(String query) {
+    setState(() => _tab = 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _libraryKey.currentState?.setQuery(query));
   }
 
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
     final pages = [
-      const LibraryPage(),
+      HomePage(key: _homeKey),
+      LibraryPage(key: _libraryKey),
       SearchPage(key: _searchKey, onJobCreated: _pollJobs),
       const JobsPage(),
       const WishlistPage(),
@@ -279,8 +293,12 @@ class _ShellState extends State<Shell> {
                   _SideButton(
                     item: _nav[i],
                     selected: _tab == i,
-                    badge: i == 2 && _activeJobs > 0 ? '$_activeJobs' : null,
-                    onTap: () => setState(() => _tab = i),
+                    badge: i == 3 && _activeJobs > 0 ? '$_activeJobs' : null,
+                    onTap: () {
+                      // back to 首页: show what was just watched
+                      if (i == 0 && _tab != 0) unawaited(_homeKey.currentState?.reload());
+                      setState(() => _tab = i);
+                    },
                   ),
                 const Spacer(),
                 const Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, 14), child: ThemeToggle()),

@@ -217,6 +217,12 @@ class JavHubApi {
   Future<void> retryJob(String id) => post('/api/jobs/$id/retry');
   Future<void> deleteJob(String id) => delete('/api/jobs/$id');
 
+  // ---------------- home / previews ----------------
+
+  Future<Home> home() async => Home.fromJson(await get('/api/home'));
+
+  Future<Trickplay> trickplay(String id) async => Trickplay(await get('/api/trickplay/${Uri.encodeComponent(id)}'));
+
   // ---------------- recommendations / wishlist ----------------
 
   Future<Recs> recs({bool refresh = false}) async =>

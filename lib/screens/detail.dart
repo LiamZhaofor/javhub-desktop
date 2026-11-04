@@ -2,11 +2,27 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app.dart';
 import '../models.dart';
 import '../player/player_page.dart';
 import '../widgets.dart';
+
+/// Opens a movie's page; its actress / tag links filter the library, 查找其它版本 searches.
+Future<void> openDetail(BuildContext context, LibraryItem it) => Navigator.of(context).push(MaterialPageRoute(
+  builder: (route) => DetailPage(
+    item: it,
+    onFilter: (q) {
+      Navigator.of(route).pop();
+      Shell.filterLibrary(context, q);
+    },
+    onSearch: (code) {
+      Navigator.of(route).pop();
+      Shell.search(context, code);
+    },
+  ),
+));
 
 class DetailPage extends StatefulWidget {
   const DetailPage({super.key, required this.item, this.onFilter, this.onSearch});
@@ -25,17 +41,33 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   String _plot = '';
+  List<String> _stills = const [];
 
   LibraryItem get it => widget.item;
 
   @override
   void initState() {
     super.initState();
-    // the list leaves the plot out; fetch it for this one movie
+    // the list leaves the plot and the stills out; fetch them for this one movie
     unawaited(App.api.libraryItem(it.id).then((full) {
-      if (mounted) setState(() => _plot = full.plot);
+      if (mounted) {
+        setState(() {
+          _plot = full.plot;
+          _stills = full.stills;
+        });
+      }
     }).catchError((_) {}));
+    // the seek-bar previews take a minute to make: start now, before 播放
+    unawaited(App.api.trickplay(it.id).then((_) {}).catchError((_) {}));
   }
+
+  String _still(String name, {int? width}) => App.api.media(it.id, 'extrafanart/$name', width: width, version: it.posterVersion);
+
+  void _showStills(int start) => showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.92),
+    builder: (_) => _StillViewer(urls: [for (final s in _stills) _still(s)], start: start),
+  );
 
   void _play(int i) {
     final PlaySource source;
@@ -54,6 +86,7 @@ class _DetailPageState extends State<DetailPage> {
       builder: (_) => PlayerPage(
         title: it.videos.length > 1 ? '${it.folder} (${i + 1})' : it.folder,
         code: it.code,
+        itemId: it.id,
         source: source,
         subtitles: [for (final s in it.subs) (s, App.api.media(it.id, s))],
       ),
@@ -179,6 +212,28 @@ class _DetailPageState extends State<DetailPage> {
               ],
             ),
           ),
+          if (_stills.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(32, 0, 32, 28),
+              sliver: SliverToBoxAdapter(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Text('剧照', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.text)),
+                    const SizedBox(width: 8),
+                    Text('${_stills.length} 张', style: TextStyle(color: p.muted, fontSize: 12.5)),
+                  ]),
+                  const SizedBox(height: 10),
+                  LayoutBuilder(builder: (context, c) {
+                    final cols = (c.maxWidth / 230).floor().clamp(2, 8);
+                    final w = (c.maxWidth - (cols - 1) * 10) / cols;
+                    return Wrap(spacing: 10, runSpacing: 10, children: [
+                      for (var i = 0; i < _stills.length; i++)
+                        _StillThumb(url: _still(_stills[i], width: 360), width: w, onTap: () => _showStills(i)),
+                    ]);
+                  }),
+                ]),
+              ),
+            ),
           if (_plot.isNotEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(32, 0, 32, 40),
@@ -201,6 +256,128 @@ class _DetailPageState extends State<DetailPage> {
       Text(title, style: TextStyle(color: Palette.of(context).muted, fontSize: 12, fontWeight: FontWeight.w600)),
       const SizedBox(height: 6),
       Wrap(spacing: 6, runSpacing: 6, children: chips),
+    ]),
+  );
+}
+
+class _StillThumb extends StatefulWidget {
+  const _StillThumb({required this.url, required this.width, required this.onTap});
+
+  final String url;
+  final double width;
+  final VoidCallback onTap;
+
+  @override
+  State<_StillThumb> createState() => _StillThumbState();
+}
+
+class _StillThumbState extends State<_StillThumb> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.zoomIn,
+    onEnter: (_) => setState(() => _hover = true),
+    onExit: (_) => setState(() => _hover = false),
+    child: GestureDetector(
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        width: widget.width,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _hover ? accent : Palette.of(context).line, width: _hover ? 1.5 : 1),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(9),
+          child: AspectRatio(aspectRatio: 3 / 2, child: NetImage(widget.url, decodeWidth: 360)),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Full-size stills, one at a time: arrows / keys to page, Esc or a click outside to close.
+class _StillViewer extends StatefulWidget {
+  const _StillViewer({required this.urls, required this.start});
+
+  final List<String> urls;
+  final int start;
+
+  @override
+  State<_StillViewer> createState() => _StillViewerState();
+}
+
+class _StillViewerState extends State<_StillViewer> {
+  late final _pages = PageController(initialPage: widget.start);
+  late int _i = widget.start;
+
+  void _go(int d) {
+    final n = (_i + d).clamp(0, widget.urls.length - 1);
+    unawaited(_pages.animateToPage(n, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic));
+  }
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    autofocus: true,
+    onKeyEvent: (_, e) {
+      if (e is! KeyDownEvent) return KeyEventResult.ignored;
+      if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        _go(-1);
+        return KeyEventResult.handled;
+      }
+      if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
+        _go(1);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: Stack(children: [
+      Positioned.fill(child: GestureDetector(onTap: () => Navigator.of(context).pop())),
+      PageView.builder(
+        controller: _pages,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _i = i),
+        itemBuilder: (_, i) => Padding(
+          padding: const EdgeInsets.fromLTRB(80, 60, 80, 60),
+          child: InteractiveViewer(child: Center(child: NetImage(widget.urls[i], fit: BoxFit.contain))),
+        ),
+      ),
+      Positioned(
+        top: 16,
+        right: 16,
+        child: IconButton.filledTonal(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded)),
+      ),
+      Positioned(
+        top: 24,
+        left: 0,
+        right: 0,
+        child: IgnorePointer(
+          child: Center(
+            child: Text('${_i + 1} / ${widget.urls.length}', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ),
+      if (_i > 0)
+        Positioned(
+          left: 16,
+          top: 0,
+          bottom: 0,
+          child: Center(child: IconButton.filledTonal(iconSize: 30, onPressed: () => _go(-1), icon: const Icon(Icons.chevron_left_rounded))),
+        ),
+      if (_i < widget.urls.length - 1)
+        Positioned(
+          right: 16,
+          top: 0,
+          bottom: 0,
+          child: Center(child: IconButton.filledTonal(iconSize: 30, onPressed: () => _go(1), icon: const Icon(Icons.chevron_right_rounded))),
+        ),
     ]),
   );
 }

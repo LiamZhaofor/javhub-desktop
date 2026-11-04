@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../app.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets.dart' show ImageStore;
 import 'stream_proxy.dart';
 import 'tools.dart';
 
@@ -28,10 +30,20 @@ const _rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 const _fits = {BoxFit.contain: '适应', BoxFit.cover: '填充', BoxFit.fill: '拉伸'};
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, required this.title, required this.code, required this.source, this.subtitles = const []});
+  const PlayerPage({
+    super.key,
+    required this.title,
+    required this.code,
+    required this.source,
+    this.itemId = '',
+    this.subtitles = const [],
+  });
 
   final String title;
   final String code;
+
+  /// The library item (for its seek-bar previews and the home page's progress).
+  final String itemId;
   final PlaySource source;
 
   /// (name, url) of the subtitle files next to the video in the library.
@@ -67,6 +79,11 @@ class _PlayerPageState extends State<PlayerPage> {
   final _statsText = ValueNotifier<String>('');
   Timer? _statsTimer;
 
+  // seek-bar previews
+  Trickplay? _tp;
+  ui.Image? _sprite;
+  final _hoverX = ValueNotifier<double?>(null);
+
   // online subtitle search
   List<OnlineSubtitle>? _online;
   bool _searching = false;
@@ -78,6 +95,33 @@ class _PlayerPageState extends State<PlayerPage> {
   void initState() {
     super.initState();
     unawaited(_start());
+    if (widget.itemId.isNotEmpty) unawaited(_loadPreviews());
+  }
+
+  /// The sprite sheet behind the seek-bar previews. JavHub makes it on the first
+  /// request (about a minute for a 115 movie), so this keeps asking for a while.
+  Future<void> _loadPreviews() async {
+    for (var i = 0; i < 40 && mounted; i++) {
+      try {
+        final tp = await App.api.trickplay(widget.itemId);
+        if (tp.ready) {
+          final bytes = await ImageStore.instance.load(App.api.url(tp.sprite), App.api.authHeaders);
+          if (bytes == null) return;
+          final image = await decodeImageFromList(bytes);
+          if (!mounted) {
+            image.dispose();
+            return;
+          }
+          setState(() {
+            _tp = tp;
+            _sprite = image;
+          });
+          return;
+        }
+        if (tp.status == 'failed') return;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(seconds: 15));
+    }
   }
 
   Future<void> _start() async {
@@ -154,6 +198,8 @@ class _PlayerPageState extends State<PlayerPage> {
     } else {
       await p.remove(_posKey);
     }
+    // how far it got, for the home page's 最近观看 (a finished one shows as full)
+    if (widget.itemId.isNotEmpty && duration > 0 && pos > 0) await p.setString('prog.${widget.itemId}', '$pos/$duration');
   }
 
   @override
@@ -165,9 +211,10 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     _tools.dispose();
     unawaited(_player.dispose());
-    for (final n in [_panel, _fit, _hwdec, _stats, _statsText]) {
+    for (final n in [_panel, _fit, _hwdec, _stats, _statsText, _hoverX]) {
       n.dispose();
     }
+    _sprite?.dispose();
     super.dispose();
   }
 
@@ -301,6 +348,56 @@ class _PlayerPageState extends State<PlayerPage> {
       child: Stack(
         children: [
           MaterialDesktopVideoControls(state),
+          // seek-bar previews: a strip over media_kit's seek bar (16 px side margins,
+          // 36 px high, 16 px into the 64 px button bar) that only listens to hovering,
+          // so dragging and clicking still reach the bar underneath
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 48,
+            height: 36,
+            child: MouseRegion(
+              opaque: false,
+              hitTestBehavior: HitTestBehavior.translucent,
+              onHover: (e) => _hoverX.value = e.localPosition.dx,
+              onExit: (_) => _hoverX.value = null,
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: LayoutBuilder(
+                builder: (context, c) => ValueListenableBuilder<double?>(
+                  valueListenable: _hoverX,
+                  builder: (_, x, _) {
+                    final duration = _player.state.duration;
+                    final barW = c.maxWidth - 32;
+                    if (x == null || duration <= Duration.zero || barW <= 0) return const SizedBox.shrink();
+                    final f = (x / barW).clamp(0.0, 1.0);
+                    final t = duration.inMilliseconds * f / 1000;
+                    final tp = _tp, sprite = _sprite;
+                    final w = tp != null && sprite != null ? 208.0 : 72.0;
+                    final h = tp != null && sprite != null ? 208.0 * tp.h / tp.w : 0.0;
+                    final left = (16 + x - w / 2).clamp(8.0, c.maxWidth - w - 8);
+                    return Stack(children: [
+                      Positioned(
+                        left: left,
+                        bottom: 92,
+                        child: _PreviewBubble(
+                          width: w,
+                          height: h,
+                          label: fmtClock(Duration(milliseconds: (t * 1000).round())),
+                          sprite: sprite,
+                          tp: tp,
+                          seconds: t,
+                        ),
+                      ),
+                    ]);
+                  },
+                ),
+              ),
+            ),
+          ),
           // statistics, top left
           ValueListenableBuilder<bool>(
             valueListenable: _stats,
@@ -853,4 +950,58 @@ class _BarTextButton extends StatelessWidget {
       child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
     ),
   );
+}
+
+/// The thumbnail and time above the seek bar while hovering it.
+class _PreviewBubble extends StatelessWidget {
+  const _PreviewBubble({required this.width, required this.height, required this.label, this.sprite, this.tp, required this.seconds});
+
+  final double width;
+  final double height;
+  final String label;
+  final ui.Image? sprite;
+  final Trickplay? tp;
+  final double seconds;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    decoration: BoxDecoration(
+      color: const Color(0xE6101216),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0x33FFFFFF)),
+      boxShadow: const [BoxShadow(color: Color(0x88000000), blurRadius: 14, offset: Offset(0, 4))],
+    ),
+    padding: const EdgeInsets.all(4),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      if (sprite != null && tp != null)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: SizedBox(width: width - 8, height: height - 8, child: CustomPaint(painter: _SpritePainter(sprite!, tp!, seconds))),
+        ),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+      ),
+    ]),
+  );
+}
+
+class _SpritePainter extends CustomPainter {
+  _SpritePainter(this.sprite, this.tp, this.seconds);
+
+  final ui.Image sprite;
+  final Trickplay tp;
+  final double seconds;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final i = tp.indexAt(seconds);
+    final cols = tp.cols <= 0 ? 10 : tp.cols;
+    final src = Rect.fromLTWH(((i % cols) * tp.w).toDouble(), ((i ~/ cols) * tp.h).toDouble(), tp.w.toDouble(), tp.h.toDouble());
+    canvas.drawImageRect(sprite, src, Offset.zero & size, Paint()..filterQuality = FilterQuality.medium);
+  }
+
+  @override
+  bool shouldRepaint(_SpritePainter old) => old.seconds != seconds || old.sprite != sprite;
 }

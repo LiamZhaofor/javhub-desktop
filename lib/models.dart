@@ -36,6 +36,8 @@ class LibraryItem {
     this.size = 0,
     this.mtime = 0,
     this.plot = '',
+    this.stills = const [],
+    this.watchedAt = 0,
   });
 
   factory LibraryItem.fromJson(Map<String, dynamic> j) => LibraryItem(
@@ -61,6 +63,8 @@ class LibraryItem {
     size: _i(j['size']),
     mtime: _d(j['mtime']),
     plot: _s(j['plot']),
+    stills: _ls(j['stills']),
+    watchedAt: _d(j['watched_at']),
   );
 
   final String id;
@@ -85,6 +89,12 @@ class LibraryItem {
   final int size;
   final double mtime;
   final String plot;
+
+  /// Stills (剧照) in extrafanart/, only in the full item.
+  final List<String> stills;
+
+  /// When it was last played (home page).
+  final double watchedAt;
 
   /// The title without the code it usually starts with; the actresses when
   /// there is no title (as under the web library's tiles).
@@ -312,4 +322,40 @@ String fmtClock(Duration d) {
   final h = d.inHours, m = d.inMinutes % 60, s = d.inSeconds % 60;
   String two(int v) => v.toString().padLeft(2, '0');
   return h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}';
+}
+
+/// The home page: recently watched, today's picks from the library, today's
+/// recommendations from JavDB.
+class Home {
+  Home(this.recent, this.picks, this.recs, this.date);
+
+  factory Home.fromJson(Map<String, dynamic> j) => Home(
+    parseLibrary(j['recent']),
+    parseLibrary(j['picks']),
+    [for (final r in (j['recs'] as List? ?? [])) if (r is Map) Rec(r.cast<String, dynamic>())],
+    _s(j['date']),
+  );
+
+  final List<LibraryItem> recent;
+  final List<LibraryItem> picks;
+  final List<Rec> recs;
+  final String date;
+}
+
+/// Seek-bar previews: a sprite sheet of `count` thumbnails, one per `interval` seconds.
+class Trickplay {
+  Trickplay(this.j);
+
+  final Map<String, dynamic> j;
+  String get status => _s(j['status']);
+  bool get ready => status == 'ready';
+  int get count => _i(j['count']);
+  double get interval => _d(j['interval']);
+  int get cols => _i(j['cols']);
+  int get w => _i(j['w']);
+  int get h => _i(j['h']);
+  String get sprite => _s(j['sprite']);
+
+  /// Index of the thumbnail for second `t`.
+  int indexAt(double t) => interval <= 0 ? 0 : (t / interval).floor().clamp(0, count - 1);
 }

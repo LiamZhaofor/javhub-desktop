@@ -107,19 +107,7 @@ class LibraryPageState extends State<LibraryPage> {
     return v;
   }
 
-  void _open(LibraryItem it) => Navigator.of(context).push(MaterialPageRoute(
-    builder: (route) => DetailPage(
-      item: it,
-      onFilter: (q) {
-        Navigator.of(route).pop();
-        setQuery(q);
-      },
-      onSearch: (code) {
-        Navigator.of(route).pop();
-        Shell.search(context, code);
-      },
-    ),
-  ));
+  void _open(LibraryItem it) => openDetail(context, it);
 
   @override
   Widget build(BuildContext context) {
