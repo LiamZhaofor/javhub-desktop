@@ -83,6 +83,7 @@ class _PlayerPageState extends State<PlayerPage> {
   Trickplay? _tp;
   ui.Image? _sprite;
   final _hoverX = ValueNotifier<double?>(null);
+  Timer? _hoverIdle;
 
   // online subtitle search
   List<OnlineSubtitle>? _online;
@@ -206,6 +207,7 @@ class _PlayerPageState extends State<PlayerPage> {
   void dispose() {
     if (_resumeDone) unawaited(_savePosition());
     _statsTimer?.cancel();
+    _hoverIdle?.cancel();
     for (final s in _subs) {
       unawaited(s.cancel());
     }
@@ -359,8 +361,16 @@ class _PlayerPageState extends State<PlayerPage> {
             child: MouseRegion(
               opaque: false,
               hitTestBehavior: HitTestBehavior.translucent,
-              onHover: (e) => _hoverX.value = e.localPosition.dx,
-              onExit: (_) => _hoverX.value = null,
+              onHover: (e) {
+                _hoverX.value = e.localPosition.dx;
+                // the controls fade out after ~3 s without movement: so does the preview
+                _hoverIdle?.cancel();
+                _hoverIdle = Timer(const Duration(milliseconds: 2800), () => _hoverX.value = null);
+              },
+              onExit: (_) {
+                _hoverIdle?.cancel();
+                _hoverX.value = null;
+              },
               child: const SizedBox.expand(),
             ),
           ),
