@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../widgets.dart';
 
 class WishlistPage extends StatefulWidget {
@@ -64,10 +65,10 @@ class _WishlistPageState extends State<WishlistPage> {
       children: [
         const PageHeader(title: '想看', subtitle: '定期自动搜索，出现资源后自动下载（可选只等中字版）'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
+          padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 12),
           child: Row(children: [
             SizedBox(
-              width: 260,
+              width: isCompact(context) ? 150 : 260,
               child: TextField(controller: _code, decoration: const InputDecoration(hintText: '番号'), onSubmitted: (_) => _add()),
             ),
             const SizedBox(width: 10),
@@ -82,7 +83,7 @@ class _WishlistPageState extends State<WishlistPage> {
               : items.isEmpty
               ? const EmptyHint('清单为空，搜索结果页可一键加入', icon: Icons.favorite_border_rounded)
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(28, 4, 28, 32),
+                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), 32),
                   itemCount: items.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, i) {

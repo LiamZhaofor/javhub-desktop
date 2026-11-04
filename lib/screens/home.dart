@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../widgets.dart';
 import 'detail.dart';
 
@@ -202,16 +203,19 @@ class _RowState extends State<_Row> {
       padding: const EdgeInsets.only(bottom: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 20, 12),
+          padding: EdgeInsets.fromLTRB(pagePad(context), 0, isCompact(context) ? 4 : 20, 12),
           child: Row(children: [
             Text(widget.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: p.text)),
-            if (widget.subtitle != null) ...[
+            if (widget.subtitle != null && !isCompact(context)) ...[
               const SizedBox(width: 10),
               Text(widget.subtitle!, style: TextStyle(color: p.muted, fontSize: 12.5)),
             ],
             const Spacer(),
-            IconButton(onPressed: _start ? null : () => _page(-1), icon: const Icon(Icons.chevron_left_rounded)),
-            IconButton(onPressed: _end ? null : () => _page(1), icon: const Icon(Icons.chevron_right_rounded)),
+            // a phone swipes the row; the arrows are for a mouse
+            if (isDesktop) ...[
+              IconButton(onPressed: _start ? null : () => _page(-1), icon: const Icon(Icons.chevron_left_rounded)),
+              IconButton(onPressed: _end ? null : () => _page(1), icon: const Icon(Icons.chevron_right_rounded)),
+            ],
           ]),
         ),
         SizedBox(
@@ -219,7 +223,7 @@ class _RowState extends State<_Row> {
           child: ListView.separated(
             controller: _c,
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 6),
+            padding: EdgeInsets.symmetric(horizontal: pagePad(context), vertical: 6),
             itemCount: widget.children.length,
             separatorBuilder: (_, _) => const SizedBox(width: 16),
             itemBuilder: (_, i) => widget.children[i],
@@ -269,7 +273,7 @@ class _WideCardState extends State<_WideCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: SizedBox(
-          width: 268,
+          width: isCompact(context) ? 232 : 268,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 160),

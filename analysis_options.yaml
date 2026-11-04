@@ -2,6 +2,7 @@ analyzer:
   exclude:
     - build/**
     - windows/**
+    - android/**
   language:
     strict-casts: false
 linter:

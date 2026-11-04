@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../player/player_page.dart';
 import '../widgets.dart';
 
@@ -139,7 +140,7 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 32, 28),
+                  padding: EdgeInsets.fromLTRB(isCompact(context) ? 12 : 20, MediaQuery.paddingOf(context).top + 14, isCompact(context) ? 12 : 32, 28),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -214,7 +215,7 @@ class _DetailPageState extends State<DetailPage> {
           ),
           if (_stills.isNotEmpty)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(32, 0, 32, 28),
+              padding: EdgeInsets.fromLTRB(isCompact(context) ? 12 : 32, 0, isCompact(context) ? 12 : 32, 28),
               sliver: SliverToBoxAdapter(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
@@ -224,7 +225,7 @@ class _DetailPageState extends State<DetailPage> {
                   ]),
                   const SizedBox(height: 10),
                   LayoutBuilder(builder: (context, c) {
-                    final cols = (c.maxWidth / 230).floor().clamp(2, 8);
+                    final cols = (c.maxWidth / (isCompact(context) ? 160 : 230)).floor().clamp(2, 8);
                     final w = (c.maxWidth - (cols - 1) * 10) / cols;
                     return Wrap(spacing: 10, runSpacing: 10, children: [
                       for (var i = 0; i < _stills.length; i++)
@@ -236,7 +237,7 @@ class _DetailPageState extends State<DetailPage> {
             ),
           if (_plot.isNotEmpty)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(32, 0, 32, 40),
+              padding: EdgeInsets.fromLTRB(isCompact(context) ? 12 : 32, 0, isCompact(context) ? 12 : 32, 40),
               sliver: SliverToBoxAdapter(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('简介', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.text)),
@@ -348,7 +349,7 @@ class _StillViewerState extends State<_StillViewer> {
         itemCount: widget.urls.length,
         onPageChanged: (i) => setState(() => _i = i),
         itemBuilder: (_, i) => Padding(
-          padding: const EdgeInsets.fromLTRB(80, 60, 80, 60),
+          padding: isCompact(context) ? const EdgeInsets.symmetric(vertical: 60) : const EdgeInsets.fromLTRB(80, 60, 80, 60),
           child: InteractiveViewer(child: SizedBox.expand(child: NetImage(widget.urls[i], fit: BoxFit.contain))),
         ),
       ),

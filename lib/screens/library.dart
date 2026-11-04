@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../widgets.dart';
 import 'detail.dart';
 
@@ -151,7 +152,7 @@ class LibraryPageState extends State<LibraryPage> {
           ],
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
+          padding: EdgeInsets.symmetric(horizontal: pagePad(context)),
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -204,11 +205,11 @@ class LibraryPageState extends State<LibraryPage> {
               ? (_loading ? const Center(child: CircularProgressIndicator()) : const EmptyHint('没有符合条件的影片', icon: Icons.movie_filter_outlined))
               : Scrollbar(
                   child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 186,
-                      mainAxisSpacing: 22,
-                      crossAxisSpacing: 18,
+                    padding: EdgeInsets.fromLTRB(pagePad(context), 8, pagePad(context), 32),
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: isCompact(context) ? 140 : 186,
+                      mainAxisSpacing: isCompact(context) ? 14 : 22,
+                      crossAxisSpacing: isCompact(context) ? 10 : 18,
                       childAspectRatio: 0.565,
                     ),
                     itemCount: view.length,

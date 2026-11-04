@@ -158,13 +158,23 @@ class JavPlayerTools extends ChangeNotifier {
     await setProperty('sub-shadow-offset', '1');
     // ASS subtitles carry their own styles; keep them readable at our size
     await setProperty('sub-ass-override', 'force');
-    await setProperty('sub-visibility', subtitlesOn ? 'yes' : 'no');
+    await setProperty('sub-visibility', 'yes');
   }
 
+  String? _sidBeforeOff;
+
+  /// Off = no subtitle track (works with mpv drawing the subtitles and with
+  /// Flutter drawing them, as on Android); on = the track that was showing.
   Future<void> setSubtitlesOn(bool on) async {
+    if (!on) {
+      final sid = await getProperty('sid');
+      if (sid.isNotEmpty && sid != 'no') _sidBeforeOff = sid;
+      await setProperty('sid', 'no');
+    } else {
+      await setProperty('sid', _sidBeforeOff ?? 'auto');
+    }
     subtitlesOn = on;
     notifyListeners();
-    await setProperty('sub-visibility', on ? 'yes' : 'no');
     toast(on ? '字幕已开启' : '字幕已关闭');
   }
 

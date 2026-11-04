@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app.dart';
+import '../platform.dart';
 import '../theme.dart';
 
 const appVersion = '0.3.1';
@@ -27,21 +28,24 @@ class SettingsPage extends StatelessWidget {
     );
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 32),
+      padding: EdgeInsets.only(bottom: 32 + MediaQuery.paddingOf(context).bottom),
       children: [
         const PageHeader(title: '设置'),
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 820),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28),
+              padding: EdgeInsets.symmetric(horizontal: pagePad(context)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 section('外观', [
                   ListTile(
                     leading: const Icon(Icons.palette_outlined),
                     title: const Text('主题'),
-                    subtitle: const Text('亮色、暗色，或跟随 Windows 设置'),
-                    trailing: ValueListenableBuilder<ThemeMode>(
+                    subtitle: Text(isDesktop ? '亮色、暗色，或跟随 Windows 设置' : '亮色、暗色，或跟随系统'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: ValueListenableBuilder<ThemeMode>(
                       valueListenable: ThemeController.instance,
                       builder: (context, mode, _) => SegmentedButton<ThemeMode>(
                         showSelectedIcon: false,
@@ -89,7 +93,7 @@ class SettingsPage extends StatelessWidget {
                     subtitle: Text('再次打开同一部影片时从上次的位置继续', style: TextStyle(color: p.muted)),
                   ),
                 ]),
-                section('播放器快捷键', [
+                if (isDesktop) section('播放器快捷键', [
                   for (final (keys, what) in const [
                     ('空格', '播放 / 暂停'),
                     ('← / →', '后退 / 前进 10 秒（连按合并为一次跳转）'),

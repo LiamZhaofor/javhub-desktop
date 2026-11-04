@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../widgets.dart';
 
 const _subPolicies = {'': '字幕默认', 'prefer': '优先中字', 'require': '只要中字', 'ignore': '不看字幕'};
@@ -120,7 +121,7 @@ class SearchPageState extends State<SearchPage> {
       children: [
         const PageHeader(title: '搜索与推荐', subtitle: '按番号查影片信息和磁力，一键下载到 NAS 或 115'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 28, 16),
+          padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 16),
           child: Row(
             children: [
               if (_result != null) ...[
@@ -139,13 +140,17 @@ class SearchPageState extends State<SearchPage> {
                 ),
               ),
               const SizedBox(width: 10),
-              SelectBox<String>(value: _policy, icon: Icons.subtitles_outlined, options: _subPolicies, onChanged: (v) => setState(() => _policy = v)),
-              const SizedBox(width: 10),
-              FilledButton.icon(
-                onPressed: _busy ? null : () => search(_q.text),
-                icon: const Icon(Icons.search_rounded, size: 18),
-                label: const Text('搜索'),
-              ),
+              if (!isCompact(context)) ...[
+                SelectBox<String>(value: _policy, icon: Icons.subtitles_outlined, options: _subPolicies, onChanged: (v) => setState(() => _policy = v)),
+                const SizedBox(width: 10),
+              ],
+              isCompact(context)
+                  ? IconButton.filled(onPressed: _busy ? null : () => search(_q.text), icon: const Icon(Icons.search_rounded))
+                  : FilledButton.icon(
+                      onPressed: _busy ? null : () => search(_q.text),
+                      icon: const Icon(Icons.search_rounded, size: 18),
+                      label: const Text('搜索'),
+                    ),
             ],
           ),
         ),
@@ -180,7 +185,7 @@ class SearchPageState extends State<SearchPage> {
         ? '根据片库 ${b['library']} 部${b['watched'] != null && b['watched'] != 0 ? '、最近看过 ${b['watched']} 部' : ''}${actors.isEmpty ? '' : '；偏好：$actors'}'
         : '';
     return ListView(
-      padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
+      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 32),
       children: [
         Row(
           children: [
@@ -209,8 +214,8 @@ class SearchPageState extends State<SearchPage> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 300,
+            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: isCompact(context) ? 220 : 300,
               mainAxisSpacing: 16,
               crossAxisSpacing: 16,
               childAspectRatio: 1.15,
@@ -244,22 +249,27 @@ class SearchPageState extends State<SearchPage> {
     final okBackends = _backends?.items.where((b) => b.ok).toList() ?? [];
     final offBackends = _backends?.items.where((b) => !b.ok && b.name != 'qbittorrent').map((b) => b.title).toSet() ?? {};
     return ListView(
-      padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
+      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 32),
       children: [
         if (d.found)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
+              child: Flex(
+                direction: isCompact(context) ? Axis.vertical : Axis.horizontal,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (m.cover.isNotEmpty)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: SizedBox(width: 420, child: AspectRatio(aspectRatio: 1.5, child: NetImage(App.api.image(m.cover)))),
+                      child: SizedBox(
+                        width: isCompact(context) ? double.infinity : 420,
+                        child: AspectRatio(aspectRatio: 1.5, child: NetImage(App.api.image(m.cover))),
+                      ),
                     ),
-                  const SizedBox(width: 20),
-                  Expanded(
+                  const SizedBox(width: 20, height: 14),
+                  Flexible(
+                    fit: isCompact(context) ? FlexFit.loose : FlexFit.tight,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -399,6 +409,40 @@ class SearchPageState extends State<SearchPage> {
     final c = d.candidates[i];
     final rejected = c.rejected.isNotEmpty;
     final hint = Theme.of(context).hintColor;
+    if (isCompact(context)) {
+      return Opacity(
+        opacity: rejected ? 0.5 : 1,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.3)))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${i + 1}. ${c.title}', maxLines: 2, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 4),
+            Wrap(spacing: 4, runSpacing: 4, children: [
+              for (final r in c.reasons)
+                Badge2(r, color: r == '中文字幕' ? accent : (r == '4K' || r == '1080p') ? const Color(0xFF16A34A) : const Color(0xFF6B7280)),
+              if (rejected) Badge2(c.rejected, color: Colors.red.shade900),
+            ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              Text(c.size, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(width: 10),
+              Text('评分 ${c.score}', style: TextStyle(color: hint, fontSize: 12)),
+              const Spacer(),
+              IconButton(
+                tooltip: '复制磁力',
+                icon: const Icon(Icons.copy, size: 16),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: c.magnet));
+                  if (mounted) toast(context, '磁力已复制');
+                },
+              ),
+              FilledButton.tonal(onPressed: () => _download(d.code, magnet: c.magnet), child: const Text('下载')),
+            ]),
+          ]),
+        ),
+      );
+    }
     return Opacity(
       opacity: rejected ? 0.5 : 1,
       child: Container(

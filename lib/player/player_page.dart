@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../theme.dart';
 import '../widgets.dart' show ImageStore;
 import 'stream_proxy.dart';
@@ -57,8 +58,9 @@ class _PlayerPageState extends State<PlayerPage> {
   late final Player _player = Player(
     configuration: PlayerConfiguration(
       title: widget.title,
-      // mpv draws the subtitles itself (ASS styles kept)
-      libass: true,
+      // desktop: mpv draws the subtitles itself (ASS styles kept); Android: Flutter
+      // draws them (libass there has no CJK font: Chinese would be boxes)
+      libass: isDesktop,
       bufferSize: 64 << 20,
     ),
   );
@@ -83,6 +85,9 @@ class _PlayerPageState extends State<PlayerPage> {
   Trickplay? _tp;
   ui.Image? _sprite;
   final _hoverX = ValueNotifier<double?>(null);
+
+  /// Phone: where the seek bar is being dragged (0-1), for the preview bubble.
+  final _dragF = ValueNotifier<double?>(null);
   Timer? _hoverIdle;
 
   // online subtitle search
@@ -97,6 +102,11 @@ class _PlayerPageState extends State<PlayerPage> {
     super.initState();
     unawaited(_start());
     if (widget.itemId.isNotEmpty) unawaited(_loadPreviews());
+    if (!isDesktop) {
+      // a phone plays fullscreen, sideways
+      unawaited(SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]));
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky));
+    }
   }
 
   /// The sprite sheet behind the seek-bar previews. JavHub makes it on the first
@@ -130,9 +140,11 @@ class _PlayerPageState extends State<PlayerPage> {
     await _tools.setProperty('demuxer-max-bytes', '256MiB');
     await _tools.setProperty('demuxer-max-back-bytes', '64MiB');
     await _tools.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
-    await _tools.setProperty('sub-font', 'Microsoft YaHei');
     await _tools.setProperty('sub-auto', 'no');
-    await _tools.setProperty('hwdec', 'auto-safe');
+    if (isDesktop) {
+      await _tools.setProperty('sub-font', 'Microsoft YaHei');
+      await _tools.setProperty('hwdec', 'auto-safe');
+    }
 
     _subs.add(_player.stream.error.listen((e) {
       if (mounted) _tools.toast('播放出错: $e');
@@ -213,8 +225,12 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     _tools.dispose();
     unawaited(_player.dispose());
-    for (final n in [_panel, _fit, _hwdec, _stats, _statsText, _hoverX]) {
+    for (final n in [_panel, _fit, _hwdec, _stats, _statsText, _hoverX, _dragF]) {
       n.dispose();
+    }
+    if (!isDesktop) {
+      unawaited(SystemChrome.setPreferredOrientations(const []));
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
     _sprite?.dispose();
     super.dispose();
@@ -349,7 +365,9 @@ class _PlayerPageState extends State<PlayerPage> {
       onKeyEvent: (_, e) => _onKey(context, e),
       child: Stack(
         children: [
-          MaterialDesktopVideoControls(state),
+          if (!isDesktop) MaterialVideoControls(state) else MaterialDesktopVideoControls(state),
+          if (!isDesktop) _dragPreview(),
+          if (isDesktop) ...[
           // seek-bar previews: a strip over media_kit's seek bar (16 px side margins,
           // 36 px high, 16 px into the 64 px button bar) that only listens to hovering,
           // so dragging and clicking still reach the bar underneath
@@ -408,6 +426,7 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
             ),
           ),
+          ],
           // statistics, top left
           ValueListenableBuilder<bool>(
             valueListenable: _stats,
@@ -651,7 +670,7 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
           ],
           const SizedBox(height: 4),
-          ValueListenableBuilder<bool>(
+          if (isDesktop) ValueListenableBuilder<bool>(
             valueListenable: _hwdec,
             builder: (_, on, _) => _SwitchRow(
               icon: Icons.memory_rounded,
@@ -667,7 +686,7 @@ class _PlayerPageState extends State<PlayerPage> {
             valueListenable: _stats,
             builder: (_, on, _) => _SwitchRow(icon: Icons.analytics_outlined, title: '统计信息', value: on, onChanged: _setStats),
           ),
-          _MenuRow(
+          if (isDesktop) _MenuRow(
             icon: Icons.photo_camera_outlined,
             title: '截图',
             subtitle: '保存到 图片\\JavHub',
@@ -739,8 +758,112 @@ class _PlayerPageState extends State<PlayerPage> {
     ],
   );
 
+  /// The preview bubble while the phone's seek bar is dragged.
+  Widget _dragPreview() => Positioned.fill(
+    child: IgnorePointer(
+      child: LayoutBuilder(
+        builder: (context, c) => ValueListenableBuilder<double?>(
+          valueListenable: _dragF,
+          builder: (_, f, _) {
+            final duration = _player.state.duration;
+            if (f == null || duration <= Duration.zero) return const SizedBox.shrink();
+            final t = duration.inMilliseconds * f / 1000;
+            final tp = _tp, sprite = _sprite;
+            final w = tp != null && sprite != null ? 200.0 : 80.0;
+            final h = tp != null && sprite != null ? 200.0 * tp.h / tp.w : 0.0;
+            final x = 16 + f * (c.maxWidth - 32);
+            return Stack(children: [
+              Positioned(
+                left: (x - w / 2).clamp(8.0, c.maxWidth - w - 8),
+                bottom: 78,
+                child: _PreviewBubble(width: w, height: h, label: fmtClock(Duration(milliseconds: (t * 1000).round())), sprite: sprite, tp: tp, seconds: t),
+              ),
+            ]);
+          },
+        ),
+      ),
+    ),
+  );
+
+  MaterialVideoControlsThemeData _touchTheme() => MaterialVideoControlsThemeData(
+    displaySeekBar: false, // ours, in the bottom bar: it shows the previews while dragging
+    seekBarPositionColor: accent,
+    seekBarThumbColor: accent,
+    seekOnDoubleTap: true,
+    seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
+    seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
+    volumeGesture: true,
+    brightnessGesture: true,
+    speedUpOnLongPress: true,
+    speedUpFactor: 3,
+    buttonBarHeight: 64,
+    topButtonBar: [
+      MaterialCustomButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => Navigator.of(context).maybePop()),
+      const SizedBox(width: 4),
+      Expanded(
+        child: Text(widget.title, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+      ),
+      if (widget.source.cloud)
+        Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(color: const Color(0xFF2563EB), borderRadius: BorderRadius.circular(5)),
+          child: const Text('115', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+        ),
+    ],
+    bottomButtonBar: [
+      const MaterialPlayOrPauseButton(),
+      const MaterialPositionIndicator(),
+      const SizedBox(width: 8),
+      Expanded(child: _TouchSeekBar(player: _player, drag: _dragF)),
+      AnimatedBuilder(
+        animation: _tools,
+        builder: (_, _) => _BarButton(
+          icon: _tools.subtitlesOn ? Icons.closed_caption_rounded : Icons.closed_caption_off_outlined,
+          tooltip: '字幕',
+          active: _panel.value == _Panel.subtitles,
+          onPressed: () => _toggle(_Panel.subtitles),
+        ),
+      ),
+      StreamBuilder<double>(
+        stream: _player.stream.rate,
+        builder: (_, _) => _BarTextButton(
+          text: _player.state.rate == 1.0 ? '倍速' : '${_player.state.rate}x',
+          tooltip: '播放速度',
+          onPressed: () => _toggle(_Panel.speed),
+        ),
+      ),
+      _BarButton(icon: Icons.settings_rounded, tooltip: '播放设置', onPressed: () => _toggle(_Panel.settings)),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
+    if (!isDesktop) {
+      final theme = _touchTheme();
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: MaterialVideoControlsTheme(
+          normal: theme,
+          fullscreen: theme,
+          child: Video(
+            controller: _video,
+            controls: _controls,
+            subtitleViewConfiguration: const SubtitleViewConfiguration(
+              style: TextStyle(
+                fontSize: 30,
+                height: 1.35,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                shadows: [Shadow(blurRadius: 4), Shadow(blurRadius: 8), Shadow(offset: Offset(1, 1), blurRadius: 2)],
+              ),
+              padding: EdgeInsets.fromLTRB(24, 0, 24, 28),
+            ),
+          ),
+        ),
+      );
+    }
     final theme = _theme();
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1014,4 +1137,91 @@ class _SpritePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SpritePainter old) => old.seconds != seconds || old.sprite != sprite;
+}
+
+/// A phone's seek bar: position, buffer, a big thumb; dragging shows where it would
+/// land (the preview bubble above) and seeks on release.
+class _TouchSeekBar extends StatefulWidget {
+  const _TouchSeekBar({required this.player, required this.drag});
+
+  final Player player;
+  final ValueNotifier<double?> drag;
+
+  @override
+  State<_TouchSeekBar> createState() => _TouchSeekBarState();
+}
+
+class _TouchSeekBarState extends State<_TouchSeekBar> {
+  final _subs = <StreamSubscription<Object?>>[];
+  double _pos = 0, _buf = 0;
+  double? _drag;
+
+  @override
+  void initState() {
+    super.initState();
+    void upd(_) {
+      final d = widget.player.state.duration.inMilliseconds;
+      if (!mounted || d <= 0) return;
+      setState(() {
+        _pos = widget.player.state.position.inMilliseconds / d;
+        _buf = widget.player.state.buffer.inMilliseconds / d;
+      });
+    }
+    _subs.add(widget.player.stream.position.listen(upd));
+    _subs.add(widget.player.stream.buffer.listen(upd));
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      unawaited(s.cancel());
+    }
+    super.dispose();
+  }
+
+  void _set(double f) {
+    setState(() => _drag = f.clamp(0.0, 1.0));
+    widget.drag.value = _drag;
+  }
+
+  void _end() {
+    final f = _drag;
+    setState(() => _drag = null);
+    widget.drag.value = null;
+    final d = widget.player.state.duration;
+    if (f != null && d > Duration.zero) unawaited(widget.player.seek(d * f));
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) {
+      final w = c.maxWidth - 16;
+      double fOf(double x) => (x - 8) / w;
+      final f = (_drag ?? _pos).clamp(0.0, 1.0);
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (e) => _set(fOf(e.localPosition.dx)),
+        onHorizontalDragUpdate: (e) => _set(fOf(e.localPosition.dx)),
+        onHorizontalDragEnd: (_) => _end(),
+        onTapDown: (e) => _set(fOf(e.localPosition.dx)),
+        onTapUp: (_) => _end(),
+        child: SizedBox(
+          height: 44,
+          child: Stack(alignment: Alignment.centerLeft, children: [
+            Positioned(left: 8, right: 8, child: Container(height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+            Positioned(left: 8, width: w * _buf.clamp(0.0, 1.0), child: Container(height: 4, decoration: BoxDecoration(color: Colors.white38, borderRadius: BorderRadius.circular(2)))),
+            Positioned(left: 8, width: w * f, child: Container(height: 4, decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(2)))),
+            Positioned(
+              left: w * f,
+              child: Container(
+                width: _drag == null ? 14 : 20,
+                height: _drag == null ? 14 : 20,
+                decoration: const BoxDecoration(color: accent, shape: BoxShape.circle),
+              ),
+            ),
+          ]),
+        ),
+      );
+    },
+  );
 }

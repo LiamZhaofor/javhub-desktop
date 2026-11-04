@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../platform.dart';
 import '../widgets.dart';
 
 class JobsPage extends StatefulWidget {
@@ -75,7 +76,7 @@ class _JobsPageState extends State<JobsPage> {
               : jobs.isEmpty
               ? const EmptyHint('还没有任务，去「搜索与推荐」输入番号开始', icon: Icons.download_outlined)
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(28, 4, 28, 32),
+                  padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), 32),
                   itemCount: jobs.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
@@ -117,13 +118,20 @@ class _JobsPageState extends State<JobsPage> {
                                     ],
                                   ),
                                 ),
-                                if (j.active) TextButton(onPressed: () => _act(() => App.api.cancelJob(j.id)), child: const Text('取消')),
-                                if (j.status == 'failed' || j.status == 'canceled')
-                                  TextButton(onPressed: () => _act(() => App.api.retryJob(j.id)), child: const Text('重试')),
-                                if (!j.active) TextButton(onPressed: () => _act(() => App.api.deleteJob(j.id)), child: const Text('删除')),
-                                TextButton(
-                                  onPressed: () => setState(() => _openLogs.contains(j.id) ? _openLogs.remove(j.id) : _openLogs.add(j.id)),
-                                  child: const Text('日志'),
+                                PopupMenuButton<String>(
+                                  tooltip: '操作',
+                                  onSelected: (v) => switch (v) {
+                                    'cancel' => _act(() => App.api.cancelJob(j.id)),
+                                    'retry' => _act(() => App.api.retryJob(j.id)),
+                                    'delete' => _act(() => App.api.deleteJob(j.id)),
+                                    _ => setState(() => _openLogs.contains(j.id) ? _openLogs.remove(j.id) : _openLogs.add(j.id)),
+                                  },
+                                  itemBuilder: (_) => [
+                                    if (j.active) const PopupMenuItem(value: 'cancel', child: Text('取消')),
+                                    if (j.status == 'failed' || j.status == 'canceled') const PopupMenuItem(value: 'retry', child: Text('重试')),
+                                    if (!j.active) const PopupMenuItem(value: 'delete', child: Text('删除')),
+                                    PopupMenuItem(value: 'log', child: Text(_openLogs.contains(j.id) ? '收起日志' : '日志')),
+                                  ],
                                 ),
                               ],
                             ),

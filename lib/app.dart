@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'api.dart';
+import 'platform.dart';
 import 'screens/home.dart';
 import 'screens/jobs.dart';
 import 'screens/library.dart';
@@ -52,6 +54,11 @@ class _AppState extends State<App> {
     builder: (context, mode, _) => MaterialApp(
       title: 'JavHub',
       debugShowCheckedModeBanner: false,
+      // Chinese UI text, and on Android the Simplified Chinese system font (as an
+      // English app the Han fallback landed on a serif)
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans', countryCode: 'CN'),
+      supportedLocales: const [Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans', countryCode: 'CN'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
       themeMode: mode,
@@ -205,18 +212,21 @@ class Shell extends StatefulWidget {
 }
 
 class _NavItem {
-  const _NavItem(this.icon, this.selected, this.label);
+  const _NavItem(this.icon, this.selected, this.label, [String? short]) : short = short ?? label;
 
   final IconData icon;
   final IconData selected;
   final String label;
+
+  /// Under the icon of a phone's bottom bar.
+  final String short;
 }
 
 const _nav = [
   _NavItem(Icons.home_outlined, Icons.home_rounded, '首页'),
   _NavItem(Icons.video_library_outlined, Icons.video_library_rounded, '片库'),
-  _NavItem(Icons.search_rounded, Icons.saved_search_rounded, '搜索与推荐'),
-  _NavItem(Icons.download_outlined, Icons.download_rounded, '下载任务'),
+  _NavItem(Icons.search_rounded, Icons.saved_search_rounded, '搜索与推荐', '搜索'),
+  _NavItem(Icons.download_outlined, Icons.download_rounded, '下载任务', '任务'),
   _NavItem(Icons.favorite_border_rounded, Icons.favorite_rounded, '想看'),
   _NavItem(Icons.tune_outlined, Icons.tune_rounded, '设置'),
 ];
@@ -272,8 +282,41 @@ class _ShellState extends State<Shell> {
       const WishlistPage(),
       SettingsPage(onLogout: widget.onLogout),
     ];
+    if (isCompact(context)) {
+      return Scaffold(
+        body: IndexedStack(index: _tab, children: pages),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          height: 64,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          indicatorColor: accent.withValues(alpha: 0.18),
+          onDestinationSelected: (i) {
+            if (i == 0 && _tab != 0) unawaited(_homeKey.currentState?.reload());
+            setState(() => _tab = i);
+          },
+          destinations: [
+            for (var i = 0; i < _nav.length; i++)
+              NavigationDestination(
+                icon: Badge(
+                  isLabelVisible: i == 3 && _activeJobs > 0,
+                  label: Text('$_activeJobs'),
+                  child: Icon(_nav[i].icon),
+                ),
+                selectedIcon: Icon(_nav[i].selected, color: accent),
+                label: _nav[i].short,
+              ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
-      body: Row(
+      // a phone held sideways also gets the sidebar: keep it clear of the status bar / notch
+      body: SafeArea(
+        top: !isDesktop,
+        bottom: !isDesktop,
+        left: !isDesktop,
+        right: false,
+        child: Row(
         children: [
           Container(
             width: 208,
@@ -307,6 +350,7 @@ class _ShellState extends State<Shell> {
           ),
           Expanded(child: IndexedStack(index: _tab, children: pages)),
         ],
+      ),
       ),
     );
   }

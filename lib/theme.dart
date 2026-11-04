@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'platform.dart';
+
 const accent = Color(0xFFE5484D);
 
 /// The palette both themes are built from: neutral greys, one red accent.
@@ -78,8 +80,12 @@ ThemeData buildTheme(Brightness brightness) {
     colorScheme: scheme,
     scaffoldBackgroundColor: p.bg,
     canvasColor: p.bg,
-    fontFamily: 'Microsoft YaHei UI',
-    fontFamilyFallback: const ['Microsoft YaHei', 'Segoe UI', 'PingFang SC'],
+    // Windows: YaHei; Android: the system font (YaHei is not there, and the fallback
+    // landed on a serif)
+    // Android: the system's own sans-serif (OEMs replace Roboto - ColorOS has no Roboto,
+    // and Flutter asking for it fell back to a serif)
+    fontFamily: isDesktop ? 'Microsoft YaHei UI' : 'sans-serif',
+    fontFamilyFallback: isDesktop ? const ['Microsoft YaHei', 'Segoe UI', 'PingFang SC'] : null,
     visualDensity: VisualDensity.standard,
     splashFactory: InkSparkle.splashFactory,
     dividerTheme: DividerThemeData(color: p.line, thickness: 1, space: 1),
@@ -221,6 +227,34 @@ class PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
+    if (isCompact(context)) {
+      // a phone: title (and subtitle) on top, the actions below at full width
+      return Padding(
+        padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 14, 16, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Text(title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: p.text)),
+            if (trailing != null) trailing!,
+          ]),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle!, style: TextStyle(color: p.muted, fontSize: 12.5), maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                // a width-limited action (the search box) takes the rest of the row
+                actions[i] is SizedBox && (actions[i] as SizedBox).width != null && (actions[i] as SizedBox).width! > 100
+                    ? Expanded(child: (actions[i] as SizedBox).child ?? const SizedBox())
+                    : actions[i],
+              ],
+            ]),
+          ],
+        ]),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 24, 28, 14),
       child: Row(
