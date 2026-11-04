@@ -96,7 +96,7 @@ class HomePageState extends State<HomePage> {
             _Row(
               title: '最近观看',
               subtitle: '包括网页和 Emby 里看过的',
-              height: 196,
+              height: 222,
               children: [for (final it in home.recent) _WideCard(item: it, progress: _progress[it.id], onTap: () => _open(it))],
             ),
           if (home.picks.isNotEmpty)
@@ -110,7 +110,7 @@ class HomePageState extends State<HomePage> {
             _Row(
               title: '每日新片推荐',
               subtitle: '片库里没有的，点开去搜索下载',
-              height: 214,
+              height: 222,
               children: [
                 for (final r in home.recs)
                   _WideCard(

@@ -338,7 +338,10 @@ class _StillViewerState extends State<_StillViewer> {
       }
       return KeyEventResult.ignored;
     },
-    child: Stack(children: [
+    // a dialog has no Material of its own: without one text gets the debug underline
+    child: Material(
+      type: MaterialType.transparency,
+      child: Stack(children: [
       Positioned.fill(child: GestureDetector(onTap: () => Navigator.of(context).pop())),
       PageView.builder(
         controller: _pages,
@@ -346,7 +349,7 @@ class _StillViewerState extends State<_StillViewer> {
         onPageChanged: (i) => setState(() => _i = i),
         itemBuilder: (_, i) => Padding(
           padding: const EdgeInsets.fromLTRB(80, 60, 80, 60),
-          child: InteractiveViewer(child: Center(child: NetImage(widget.urls[i], fit: BoxFit.contain))),
+          child: InteractiveViewer(child: SizedBox.expand(child: NetImage(widget.urls[i], fit: BoxFit.contain))),
         ),
       ),
       Positioned(
@@ -379,5 +382,6 @@ class _StillViewerState extends State<_StillViewer> {
           child: Center(child: IconButton.filledTonal(iconSize: 30, onPressed: () => _go(1), icon: const Icon(Icons.chevron_right_rounded))),
         ),
     ]),
+    ),
   );
 }
