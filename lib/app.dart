@@ -12,6 +12,7 @@ import 'screens/search.dart';
 import 'screens/settings.dart';
 import 'screens/wishlist.dart';
 import 'theme.dart';
+import 'updater.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -243,6 +244,10 @@ class _ShellState extends State<Shell> {
   void initState() {
     super.initState();
     unawaited(_pollJobs());
+    // a newer build on JavHub? asked once a start, a little after it
+    Future<void>.delayed(const Duration(seconds: 4), () {
+      if (mounted) unawaited(checkForUpdate(context));
+    });
   }
 
   @override

@@ -50,3 +50,5 @@ Name: "{userdesktop}\JavHub"; Filename: "{app}\JavHub.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\JavHub.exe"; Description: "{cm:LaunchProgram,JavHub}"; Flags: nowait postinstall skipifsilent
+; an update started from inside the app runs silently: open the new version afterwards
+Filename: "{app}\JavHub.exe"; Flags: nowait; Check: WizardSilent

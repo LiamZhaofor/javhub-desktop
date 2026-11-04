@@ -1,7 +1,8 @@
-name: Build (Windows)
+name: Build and release
 
-# Analyze and test on Linux first (fast), then build the Windows app and publish it
-# as the rolling "latest" pre-release (a zip: unpack and run JavHub.exe).
+# Every push to main: analyze + test, build the Windows installer and the Android APK,
+# then publish them: the rolling "latest" GitHub pre-release, and JavHub's update
+# channel (the apps offer an update when the build number in pubspec.yaml went up).
 on:
   push:
     branches: [main]
@@ -20,8 +21,17 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
     steps:
       - uses: actions/checkout@v4
+      - id: v
+        name: Version
+        run: |
+          line=$(grep -E '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+          echo "version=${line%%+*}" >> "$GITHUB_OUTPUT"
+          echo "build=${line##*+}" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -49,25 +59,78 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
-          $zip = "JavHub-Windows-v$version.zip"
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath $zip
+          $version = "${{ needs.check.outputs.version }}"
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "JavHub-Windows-v$version.zip"
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer\javhub.iss
-          $setup = (Get-ChildItem dist -Filter "JavHub-Setup-*.exe" | Select-Object -First 1).FullName
-          "ZIP=$zip" >> $env:GITHUB_ENV
-          "SETUP=$setup" >> $env:GITHUB_ENV
+          Move-Item (Get-ChildItem dist -Filter "JavHub-Setup-*.exe" | Select-Object -First 1).FullName .
       - uses: actions/upload-artifact@v4
         with:
-          name: javhub-windows
+          name: windows
           path: |
-            ${{ env.ZIP }}
-            ${{ env.SETUP }}
+            JavHub-Setup-*.exe
+            JavHub-Windows-*.zip
           if-no-files-found: error
-      - name: Publish "latest" pre-release
-        shell: pwsh
+
+  android:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Signing key
+        # the same key the phone's installed copy is signed with, so updates install over it
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          mkdir -p ~/.android
+          echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
+      - name: Build
+        run: flutter build apk --release --target-platform android-arm64
+      - run: cp build/app/outputs/flutter-apk/app-release.apk "JavHub-Android-v${{ needs.check.outputs.version }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: JavHub-Android-*.apk
+          if-no-files-found: error
+
+  publish:
+    needs: [check, windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}" --jq .commit.message | sed '/^Co-Authored-By:/d' > notes.txt
+          echo "---"; cat notes.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: JavHub update channel
+        env:
+          TOKEN: ${{ secrets.JAVHUB_UPLOAD_TOKEN }}
+          URL: ${{ vars.JAVHUB_URL }}
+        run: |
+          up() {
+            curl -sS --fail-with-body --retry 3 --max-time 900 -H "Authorization: Bearer $TOKEN" \
+              -F platform="$1" -F version="${{ needs.check.outputs.version }}" -F build="${{ needs.check.outputs.build }}" \
+              -F notes="<notes.txt" -F file=@"$2" "$URL/api/updates/upload"
+            echo
+          }
+          up windows JavHub-Setup-*.exe
+          up android JavHub-Android-*.apk
+      - name: GitHub pre-release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "JavHub Windows 客户端自动构建（提交 ${{ github.sha }}）。下载 JavHub-Setup 安装（无需管理员权限，会建开始菜单和桌面快捷方式），或下载 zip 解压即用。"
-          gh release delete latest --yes --cleanup-tag 2>$null
-          gh release create latest $env:SETUP $env:ZIP --prerelease --target ${{ github.sha }} --title "JavHub Windows 最新构建" --notes $notes
+          gh release delete latest --yes --cleanup-tag -R "${{ github.repository }}" 2>/dev/null || true
+          gh release create latest JavHub-Setup-*.exe JavHub-Windows-*.zip JavHub-Android-*.apk -R "${{ github.repository }}" \
+            --prerelease --target "${{ github.sha }}" --title "JavHub ${{ needs.check.outputs.version }} (${{ needs.check.outputs.build }})" \
+            --notes-file notes.txt

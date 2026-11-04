@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import '../app.dart';
 import '../platform.dart';
 import '../theme.dart';
+import '../updater.dart';
 
-const appVersion = '0.4.0';
+const appVersion = '0.4.1';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -114,7 +115,22 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                 ]),
-                Text('JavHub Desktop $appVersion', textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 12)),
+                section('关于', [
+                  FutureBuilder<(String, int)>(
+                    future: Updater.current(),
+                    builder: (context, snap) => ListTile(
+                      leading: const Icon(Icons.info_outline_rounded),
+                      title: Text('JavHub ${snap.data?.$1 ?? appVersion}'),
+                      subtitle: Text('构建 ${snap.data?.$2 ?? '-'} · ${isDesktop ? 'Windows' : 'Android'} · 新版本由 JavHub 服务器分发',
+                          style: TextStyle(color: p.muted)),
+                      trailing: FilledButton.tonalIcon(
+                        onPressed: () => checkForUpdate(context, quiet: false),
+                        icon: const Icon(Icons.system_update_alt_rounded, size: 18),
+                        label: const Text('检查更新'),
+                      ),
+                    ),
+                  ),
+                ]),
               ]),
             ),
           ),
