@@ -58,7 +58,6 @@ class _WishlistPageState extends State<WishlistPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
     final items = _items;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

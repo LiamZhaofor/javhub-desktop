@@ -86,6 +86,8 @@ class JavPlayerTools extends ChangeNotifier {
   double? _speedBeforeAcceleration;
   int _pendingSeekMs = 0;
   Timer? _seekTimer;
+  Duration? _lastTarget;
+  DateTime _lastSeekAt = DateTime(2000);
   bool _disposed = false;
 
   bool get accelerating => _accelerating;
@@ -218,9 +220,16 @@ class JavPlayerTools extends ChangeNotifier {
       _pendingSeekMs = 0;
       if (ms == 0 || _disposed) return;
       final duration = player.state.duration;
-      var target = player.state.position + Duration(milliseconds: ms);
+      // A 115 seek takes a moment: until it lands the position still reads the
+      // old place, and the next jump must build on the last target instead.
+      final now = DateTime.now();
+      final pending = _lastTarget != null && now.difference(_lastSeekAt) < const Duration(seconds: 4) &&
+          (player.state.position - _lastTarget!).abs() > const Duration(seconds: 2);
+      var target = (pending ? _lastTarget! : player.state.position) + Duration(milliseconds: ms);
       if (target < Duration.zero) target = Duration.zero;
       if (duration > Duration.zero && target > duration) target = duration - const Duration(seconds: 1);
+      _lastTarget = target;
+      _lastSeekAt = now;
       unawaited(player.seek(target));
     });
   }

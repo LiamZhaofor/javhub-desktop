@@ -57,6 +57,8 @@ class _PlayerPageState extends State<PlayerPage> {
   String? _error;
   final _subs = <StreamSubscription<Object?>>[];
   Duration _lastPos = Duration.zero;
+  Duration _savedAt = Duration.zero;
+  bool _resumeDone = false; // no saving before the old position was read
 
   final _panel = ValueNotifier<_Panel?>(null);
   final _fit = ValueNotifier<BoxFit>(BoxFit.contain);
@@ -90,7 +92,13 @@ class _PlayerPageState extends State<PlayerPage> {
     _subs.add(_player.stream.error.listen((e) {
       if (mounted) _tools.toast('播放出错: $e');
     }));
-    _subs.add(_player.stream.position.listen((p) => _lastPos = p));
+    _subs.add(_player.stream.position.listen((p) {
+      _lastPos = p;
+      if (_resumeDone && (p - _savedAt).abs() > const Duration(seconds: 15)) {
+        _savedAt = p;
+        unawaited(_savePosition());
+      }
+    }));
     _subs.add(_player.stream.playing.listen((playing) {
       if (playing && _status != null && mounted) setState(() => _status = null);
     }));
@@ -119,6 +127,7 @@ class _PlayerPageState extends State<PlayerPage> {
       await _tools.loadRemoteFile(name, subUrl, App.api.authHeaders);
     }
     await _resume();
+    _resumeDone = true;
   }
 
   /// Back to where this movie was left last time.
@@ -133,18 +142,23 @@ class _PlayerPageState extends State<PlayerPage> {
     _tools.toast('从上次的 ${fmtClock(Duration(seconds: saved))} 继续');
   }
 
-  @override
-  void dispose() {
+  /// Where to resume next time (also saved during playback: closing the window
+  /// skips dispose()).
+  Future<void> _savePosition() async {
     final pos = _lastPos.inSeconds;
     final duration = _player.state.duration.inSeconds;
-    unawaited(SharedPreferences.getInstance().then((p) {
-      // finished (or barely started): next time from the start
-      if (pos > 30 && (duration == 0 || pos < duration - 60)) {
-        p.setInt(_posKey, pos);
-      } else {
-        p.remove(_posKey);
-      }
-    }));
+    final p = await SharedPreferences.getInstance();
+    // finished (or barely started): next time from the start
+    if (pos > 30 && (duration == 0 || pos < duration - 60)) {
+      await p.setInt(_posKey, pos);
+    } else {
+      await p.remove(_posKey);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_resumeDone) unawaited(_savePosition());
     _statsTimer?.cancel();
     for (final s in _subs) {
       unawaited(s.cancel());
@@ -242,14 +256,32 @@ class _PlayerPageState extends State<PlayerPage> {
 
   // ---------------- keys ----------------
 
+  // Every player key is handled here, on a node above everything in the player:
+  // media_kit's own shortcuts only fire while its inner node has the focus, which
+  // it loses to ours, to a menu row, ... (arrow keys then did nothing).
   KeyEventResult _onKey(BuildContext context, KeyEvent e) {
     if (_tools.handleKey(e)) return KeyEventResult.handled;
+    final key = e.logicalKey;
+    if (e is KeyDownEvent || e is KeyRepeatEvent) {
+      if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.arrowRight) {
+        _tools.queueSeek(key == LogicalKeyboardKey.arrowLeft ? -10 : 10);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
+        _volume(key == LogicalKeyboardKey.arrowUp ? 5 : -5);
+        return KeyEventResult.handled;
+      }
+    }
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
-    if (e.logicalKey == LogicalKeyboardKey.keyF || e.logicalKey == LogicalKeyboardKey.enter) {
+    if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.mediaPlayPause) {
+      unawaited(_player.playOrPause());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyF || key == LogicalKeyboardKey.enter) {
       unawaited(toggleFullscreen(context));
       return KeyEventResult.handled;
     }
-    if (e.logicalKey == LogicalKeyboardKey.escape) {
+    if (key == LogicalKeyboardKey.escape) {
       _back(context);
       return KeyEventResult.handled;
     }
@@ -363,13 +395,18 @@ class _PlayerPageState extends State<PlayerPage> {
 
       return AnimatedBuilder(
         animation: _tools,
-        builder: (_, _) => StreamBuilder<Track>(
+        builder: (_, _) => StreamBuilder<Tracks>(
+          // the list grows when a subtitle is added; the selection changes on its own
+          stream: _player.stream.tracks,
+          builder: (_, _) => StreamBuilder<Track>(
           stream: _player.stream.track,
           builder: (_, _) {
             final tracks = _player.state.tracks.subtitle.where((t) => t.id != 'auto' && t.id != 'no').toList();
-            final current = _player.state.track.subtitle;
             final video = _player.state.duration;
-            return SizedBox(
+            // mpv's own idea of the selected track: a sub-add selects without media_kit noticing
+            return FutureBuilder<String>(
+              future: _tools.getProperty('sid'),
+              builder: (_, sid) => SizedBox(
               width: 360,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -383,7 +420,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       child: ListView(shrinkWrap: true, children: [
                         for (final t in tracks)
                           _MenuRow(
-                            selected: t.id == current.id && _tools.subtitlesOn,
+                            selected: t.id == sid.data && _tools.subtitlesOn,
                             title: t.title ?? t.language ?? '字幕 ${t.id}',
                             onTap: () async {
                               await _player.setSubtitleTrack(t);
@@ -437,8 +474,10 @@ class _PlayerPageState extends State<PlayerPage> {
                   const SizedBox(height: 6),
                 ],
               ),
+            ),
             );
           },
+        ),
         ),
       );
     },
@@ -547,14 +586,8 @@ class _PlayerPageState extends State<PlayerPage> {
     buttonBarHeight: 64,
     buttonBarButtonSize: 26,
     toggleFullscreenOnDoublePress: true,
-    keyboardShortcuts: {
-      const SingleActivator(LogicalKeyboardKey.space): () => unawaited(_player.playOrPause()),
-      const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () => unawaited(_player.playOrPause()),
-      const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _tools.queueSeek(-10),
-      const SingleActivator(LogicalKeyboardKey.arrowRight): () => _tools.queueSeek(10),
-      const SingleActivator(LogicalKeyboardKey.arrowUp): () => _volume(5),
-      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _volume(-5),
-    },
+    // all keys go through _onKey (an empty map turns media_kit's own off)
+    keyboardShortcuts: const {},
     topButtonBar: [
       Builder(builder: (context) => MaterialDesktopCustomButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => _back(context))),
       const SizedBox(width: 8),
@@ -752,7 +785,8 @@ class _SwitchRow extends StatelessWidget {
         SizedBox(width: 22, child: Icon(icon, size: 18, color: Colors.white70)),
         const SizedBox(width: 8),
         Expanded(child: Text(title, style: const TextStyle(fontSize: 13.5))),
-        Transform.scale(scale: 0.8, child: Switch(value: value, onChanged: onChanged)),
+        // the whole row is the button (a tap on the switch itself went nowhere)
+        IgnorePointer(child: Transform.scale(scale: 0.8, child: Switch(value: value, onChanged: onChanged))),
       ]),
     ),
   );

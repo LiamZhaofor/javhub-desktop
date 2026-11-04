@@ -49,7 +49,11 @@ class ImageStore {
   Future<Uint8List?> load(String url, Map<String, String> headers) {
     final hit = _memory[url];
     if (hit != null) return Future.value(hit);
-    return _loading[url] ??= _load(url, headers).whenComplete(() => _loading.remove(url));
+    // (a block body: `=> _loading.remove(url)` would hand whenComplete this very
+    // future to wait for, and it would never complete)
+    return _loading[url] ??= _load(url, headers).whenComplete(() {
+      _loading.remove(url);
+    });
   }
 
   Future<Uint8List?> _load(String url, Map<String, String> headers) async {
@@ -159,9 +163,11 @@ class _NetImageState extends State<NetImage> {
       fit: widget.fit,
       gaplessPlayback: true,
       cacheWidth: widget.decodeWidth,
-      frameBuilder: (context, child, frame, sync) => sync
+      frameBuilder: (context, child, frame, sync) {
+        return sync
           ? child
-          : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 220), child: child),
+          : AnimatedOpacity(opacity: frame == null ? 0 : 1, duration: const Duration(milliseconds: 220), child: child);
+      },
       errorBuilder: (context, _, _) => _empty(context, broken: true),
     );
   }
