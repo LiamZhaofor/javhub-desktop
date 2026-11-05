@@ -8,7 +8,10 @@ import '../platform.dart';
 import '../widgets.dart';
 
 class WishlistPage extends StatefulWidget {
-  const WishlistPage({super.key});
+  const WishlistPage({super.key, this.embedded = false});
+
+  /// Inside 收藏 (which has its own title).
+  final bool embedded;
 
   @override
   State<WishlistPage> createState() => _WishlistPageState();
@@ -63,7 +66,13 @@ class _WishlistPageState extends State<WishlistPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const PageHeader(title: '想看', subtitle: '定期自动搜索，出现资源后自动下载（可选只等中字版）'),
+        if (widget.embedded)
+          Padding(
+            padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 10),
+            child: Text('定期自动搜索这些番号，出现资源后自动下载（可选只等中字版）', style: TextStyle(color: Palette.of(context).muted, fontSize: 12.5)),
+          )
+        else
+          const PageHeader(title: '想看', subtitle: '定期自动搜索，出现资源后自动下载（可选只等中字版）'),
         Padding(
           padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 12),
           child: Row(children: [

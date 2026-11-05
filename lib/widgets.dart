@@ -59,14 +59,23 @@ class ImageStore {
   }
 
   Future<Uint8List?> _load(String url, Map<String, String> headers) async {
-    final file = File('${(await _cacheDir()).path}${Platform.pathSeparator}${_key(url)}');
+    final file = File('${(await _cacheDir()).path}${Platform.pathSeparator}${_key(App.api.canonical(url))}');
     try {
       if (await file.exists()) return _remember(url, await file.readAsBytes());
     } catch (_) {}
     // a few at a time: dozens of parallel requests over a slow uplink all arrive late
     await _slot();
     try {
-      final r = await _client.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 40));
+      http.Response r;
+      try {
+        r = await _client.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 40));
+      } on Object catch (e) {
+        // the home address can't be reached any more: the same picture over the internet
+        final public = App.api.canonical(url);
+        if (public == url || !(e is SocketException || e is http.ClientException)) rethrow;
+        App.api.dropLan();
+        r = await _client.get(Uri.parse(public), headers: headers).timeout(const Duration(seconds: 40));
+      }
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
       final bytes = Uint8List.fromList(r.bodyBytes);
       unawaited(file.writeAsBytes(bytes).then((_) {}, onError: (_) {}));

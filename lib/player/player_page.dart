@@ -147,6 +147,8 @@ class _PlayerPageState extends State<PlayerPage> {
     await _tools.setProperty('network-timeout', '20');
     await _tools.setProperty('demuxer-max-bytes', '256MiB');
     await _tools.setProperty('demuxer-max-back-bytes', '64MiB');
+    // after a seek (or a stall) play on once 0.6 s is buffered, not mpv's 1 s
+    await _tools.setProperty('cache-pause-wait', '0.6');
     await _tools.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
     await _tools.setProperty('sub-auto', 'no');
     if (isDesktop) {
@@ -164,11 +166,24 @@ class _PlayerPageState extends State<PlayerPage> {
         unawaited(_savePosition());
       }
     }));
+    var moved = false;
+    _subs.add(_player.stream.position.listen((p) {
+      if (!moved && p > Duration.zero) {
+        moved = true;
+        trace('position ${p.inMilliseconds} ms');
+      }
+    }));
+    _subs.add(_player.stream.buffering.listen((b) => trace('buffering $b')));
     _subs.add(_player.stream.playing.listen((playing) {
+      trace('playing $playing');
       if (playing && _status != null && mounted) setState(() => _status = null);
       if (!playing && _resumeDone) unawaited(_savePosition());
     }));
 
+    // where to start, asked while the stream is being set up: mpv then opens right
+    // there instead of playing from 0:00 and seeking (one CDN round trip less)
+    trace('play pressed');
+    final startAt = _startPosition();
     var url = widget.source.url;
     var headers = App.api.authHeaders;
     if (widget.source.cloud) {
@@ -179,49 +194,46 @@ class _PlayerPageState extends State<PlayerPage> {
         headers = const {}; // loopback: no login needed
       }
     }
+    final (start, from) = await startAt;
+    trace('start position $start');
     if (!mounted) return;
     setState(() => _status = '正在缓冲…');
     try {
-      await _player.open(Media(url, httpHeaders: headers));
+      await _player.open(Media(url, httpHeaders: headers, start: start > 0 ? Duration(seconds: start) : null));
+      trace('opened');
     } catch (e) {
       if (mounted) setState(() => _error = '无法打开视频: $e');
       return;
     }
     await _tools.init();
+    if (start > 0) _tools.toast('从上次的 ${fmtClock(Duration(seconds: start))} 继续${from.isEmpty || from == _device ? '' : '（$from）'}');
+    _resumeDone = true;
     // the library's own subtitles: the first one ends up selected
     for (final (name, subUrl) in widget.subtitles.reversed) {
       await _tools.loadRemoteFile(name, subUrl, App.api.authHeaders);
     }
-    await _resume();
-    _resumeDone = true;
   }
 
-  /// Back to where this movie was left: JavHub's shared progress (any device, Emby
-  /// included), else this device's own note of it (offline).
-  Future<void> _resume() async {
-    if (!widget.resume) return;
-    var saved = 0;
-    var from = '';
-    Progress? remote;
+  /// Where this movie was left: JavHub's shared progress (any device, Emby included),
+  /// else this device's own note of it (offline). (0, '') = from the start.
+  Future<(int, String)> _startPosition() async {
+    if (!widget.resume) return (0, '');
     if (widget.itemId.isNotEmpty) {
+      Progress? remote;
+      var asked = false;
       try {
-        remote = (await App.api.progress(widget.itemId).timeout(const Duration(seconds: 8)))[widget.part];
+        remote = (await App.api.progress(widget.itemId).timeout(const Duration(seconds: 6)))[widget.part];
+        asked = true;
       } catch (_) {}
+      if (asked) {
+        if (remote == null || !remote.resumable) return (0, '');
+        final pos = remote.pos.floor();
+        if (pos < 30 || (remote.dur > 0 && pos > remote.dur - 60)) return (0, '');
+        return (pos, remote.device);
+      }
     }
-    if (remote != null) {
-      if (!remote.resumable) return;
-      saved = remote.pos.floor();
-      from = remote.device;
-    } else {
-      saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
-    }
-    if (saved < 30) return;
-    final duration = await _player.stream.duration
-        .firstWhere((d) => d > Duration.zero)
-        .timeout(const Duration(seconds: 30), onTimeout: () => Duration.zero);
-    if (!mounted || duration == Duration.zero || saved > duration.inSeconds - 60) return;
-    await _player.seek(Duration(seconds: saved));
-    _tools.toast('从上次的 ${fmtClock(Duration(seconds: saved))} 继续${from.isEmpty || from == _device ? '' : '（$from）'}');
+    final saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
+    return saved >= 30 ? (saved, '') : (0, '');
   }
 
   static String get _device => Platform.isAndroid ? 'Android' : (Platform.isWindows ? 'Windows' : Platform.operatingSystem);

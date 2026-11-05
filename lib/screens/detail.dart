@@ -8,6 +8,7 @@ import '../app.dart';
 import '../models.dart';
 import '../platform.dart';
 import '../player/player_page.dart';
+import '../player/stream_proxy.dart';
 import '../widgets.dart';
 import 'actor.dart';
 
@@ -63,6 +64,19 @@ class _DetailPageState extends State<DetailPage> {
     unawaited(_loadProgress());
     // the seek-bar previews take a minute to make: start now, before 播放
     unawaited(App.api.trickplay(it.id).then((_) {}).catchError((_) {}));
+    // a 115 movie: the link and the file's start and end (its index) while the
+    // page is read, so 播放 starts at once (on a phone away from home: the link only)
+    final cloud = _cloudUrl(0);
+    if (cloud != null) JavStreamProxy.instance.prepare(cloud, headers: App.api.authHeaders, tail: isDesktop || App.api.lan);
+  }
+
+  /// JavHub's 115 route for part [i]; null when it has no 115 source.
+  String? _cloudUrl(int i) {
+    if (!it.cloud) return null;
+    final src = it.sources.length > i ? it.sources[i] : (it.sources.isEmpty ? '' : it.sources.first);
+    if (src.isEmpty) return null;
+    final path = src.split('/').map(Uri.encodeComponent).join('/');
+    return App.api.url('/play/ol$path', {'mode': 'direct', 'relay': '0'});
   }
 
   Future<void> _loadProgress() async {
@@ -83,13 +97,12 @@ class _DetailPageState extends State<DetailPage> {
   void _play(int i, {bool resume = true}) {
     final PlaySource source;
     if (it.cloud) {
-      final src = it.sources.length > i ? it.sources[i] : (it.sources.isEmpty ? '' : it.sources.first);
-      if (src.isEmpty) {
+      final url = _cloudUrl(i);
+      if (url == null) {
         toast(context, '找不到网盘源文件，请先在网页端同步 STRM 片库');
         return;
       }
-      final path = src.split('/').map(Uri.encodeComponent).join('/');
-      source = PlaySource(url: App.api.url('/play/ol$path', {'mode': 'direct', 'relay': '0'}), cloud: true);
+      source = PlaySource(url: url, cloud: true);
     } else {
       source = PlaySource(url: App.api.media(it.id, it.videos[i]), cloud: false);
     }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -25,7 +26,9 @@ class ApiError implements Exception {
 /// The JavHub web API, as the browser uses it: a session cookie from /api/login,
 /// JSON everywhere, the library list with an ETag.
 class JavHubApi {
-  JavHubApi({http.Client? client}) : _http = client ?? http.Client();
+  JavHubApi({http.Client? client})
+    // a short connect timeout: the home address, away from home, fails fast
+    : _http = client ?? IOClient(HttpClient()..connectionTimeout = const Duration(seconds: 6));
 
   final http.Client _http;
   String server = defaultServer;
@@ -34,6 +37,42 @@ class JavHubApi {
 
   /// The client runs on the same network as the NAS (no 115 limits to dodge there).
   bool lan = false;
+
+  /// JavHub's address on the home network (from /api/me) and whether it is in use:
+  /// at home every request goes straight to the NAS instead of over the internet
+  /// (~0.2 s instead of ~1 s a request); away, or when it stops answering, [server].
+  String _lanUrl = '';
+  String? _lanBase;
+  Timer? _lanTimer;
+
+  String get base => _lanBase ?? server;
+
+  /// [url] as if it were made with [server]: the same picture keeps one cache
+  /// entry whichever address fetched it.
+  String canonical(String url) {
+    final b = _lanBase;
+    return b != null && url.startsWith(b) ? server + url.substring(b.length) : url;
+  }
+
+  Future<void> _probeLan() async {
+    final lanUrl = _lanUrl;
+    if (lanUrl.isEmpty || _token == null) return;
+    var ok = false;
+    try {
+      final r = await _http.get(Uri.parse('$lanUrl/api/me'), headers: authHeaders).timeout(const Duration(milliseconds: 1500));
+      ok = r.statusCode == 200 && _decode(r)['user'] != null;
+    } catch (_) {}
+    _lanBase = ok ? lanUrl : null;
+    if (ok) lan = true;
+  }
+
+  void _lanFailed() {
+    _lanBase = null;
+    lan = false;
+  }
+
+  /// Something else (a picture) found the home address unreachable.
+  void dropLan() => _lanFailed();
 
   /// Called when the server says the session is gone.
   void Function()? onUnauthorized;
@@ -46,6 +85,7 @@ class JavHubApi {
   bool get loggedIn => _token != null;
 
   Uri uri(String path, [Map<String, String>? query]) {
+    final server = this.base;
     final base = Uri.parse(server.endsWith('/') ? server.substring(0, server.length - 1) : server);
     final p = Uri.parse(path);
     return base.replace(
@@ -96,6 +136,8 @@ class JavHubApi {
       await post('/api/logout');
     } catch (_) {}
     _token = null;
+    _lanBase = null;
+    _lanTimer?.cancel();
     final p = await SharedPreferences.getInstance();
     await p.remove(_prefToken);
   }
@@ -106,6 +148,15 @@ class JavHubApi {
     try {
       final d = await get('/api/me');
       lan = d['lan'] == true;
+      _lanUrl = '${d['lan_url'] ?? ''}'.replaceAll(RegExp(r'/+$'), '');
+      if (d['user'] != null && _lanUrl.isNotEmpty && _lanBase == null) {
+        await _probeLan();
+        // a phone moves between home Wi-Fi and the mobile network: look again now and then
+        _lanTimer?.cancel();
+        _lanTimer = Timer.periodic(const Duration(minutes: 3), (_) {
+          if (_lanBase == null) unawaited(_probeLan());
+        });
+      }
       return d['user'] != null;
     } on ApiError catch (e) {
       if (e.unauthorized) return false;
@@ -125,7 +176,15 @@ class JavHubApi {
   Future<Map<String, dynamic>> _send(Future<http.Response> Function() call) async {
     final http.Response r;
     try {
-      r = await call().timeout(const Duration(seconds: 60));
+      try {
+        r = await call().timeout(const Duration(seconds: 60));
+      } on Object catch (e) {
+        // the home address can't be reached (left the Wi-Fi): over the internet again.
+        // Only a failed connection - the request never went out, so it is safe to repeat.
+        if (_lanBase == null || !(e is SocketException || e is http.ClientException)) rethrow;
+        _lanFailed();
+        return await _send(call);
+      }
     } on TimeoutException {
       throw ApiError('连接 JavHub 超时');
     } on SocketException catch (e) {
@@ -246,6 +305,12 @@ class JavHubApi {
 
   Future<ActorInfo> actor(String name, {bool refresh = false}) async =>
       ActorInfo(await get('/api/actors/${Uri.encodeComponent(name)}', refresh ? {'refresh': '1'} : null));
+
+  /// The actresses followed: name -> {aid, jname, since}.
+  Future<Map<String, Map<String, dynamic>>> follows() async {
+    final f = (await get('/api/actors'))['follows'];
+    return f is Map ? {for (final e in f.entries) '${e.key}': e.value is Map ? (e.value as Map).cast<String, dynamic>() : <String, dynamic>{}} : {};
+  }
 
   Future<void> follow(String name, bool on) => _put('/api/actors/${Uri.encodeComponent(name)}/follow', {'on': on});
 

@@ -12,7 +12,7 @@ import 'screens/jobs.dart';
 import 'screens/library.dart';
 import 'screens/search.dart';
 import 'screens/settings.dart';
-import 'screens/wishlist.dart';
+import 'screens/favorites.dart';
 import 'theme.dart';
 import 'updater.dart';
 
@@ -251,7 +251,7 @@ const _nav = [
   _NavItem(Icons.video_library_outlined, Icons.video_library_rounded, '片库'),
   _NavItem(Icons.search_rounded, Icons.saved_search_rounded, '搜索与推荐', '搜索'),
   _NavItem(Icons.download_outlined, Icons.download_rounded, '下载任务', '任务'),
-  _NavItem(Icons.favorite_border_rounded, Icons.favorite_rounded, '想看'),
+  _NavItem(Icons.favorite_border_rounded, Icons.favorite_rounded, '收藏'),
   _NavItem(Icons.tune_outlined, Icons.tune_rounded, '设置'),
 ];
 
@@ -260,6 +260,7 @@ class _ShellState extends State<Shell> {
   final _searchKey = GlobalKey<SearchPageState>();
   final _libraryKey = GlobalKey<LibraryPageState>();
   final _homeKey = GlobalKey<HomePageState>();
+  final _favKey = GlobalKey<FavoritesPageState>();
   int _activeJobs = 0;
   Timer? _jobsTimer;
 
@@ -312,7 +313,7 @@ class _ShellState extends State<Shell> {
       LibraryPage(key: _libraryKey),
       SearchPage(key: _searchKey, onJobCreated: _pollJobs),
       const JobsPage(),
-      const WishlistPage(),
+      FavoritesPage(key: _favKey),
       SettingsPage(onLogout: widget.onLogout),
     ];
     if (isCompact(context)) {
@@ -331,6 +332,7 @@ class _ShellState extends State<Shell> {
             }
             unawaited(HapticFeedback.selectionClick());
             if (i == 0) unawaited(_homeKey.currentState?.reload());
+            if (i == 4) unawaited(_favKey.currentState?.reload());
             setState(() => _tab = i);
           },
         ),
@@ -375,6 +377,7 @@ class _ShellState extends State<Shell> {
                       onTap: () {
                         // back to 首页: show what was just watched
                         if (i == 0 && _tab != 0) unawaited(_homeKey.currentState?.reload());
+                        if (i == 4 && _tab != 4) unawaited(_favKey.currentState?.reload());
                         setState(() => _tab = i);
                       },
                     ),
