@@ -182,7 +182,9 @@ class SearchPageState extends State<SearchPage> {
     final b = r.basis;
     final actors = (b['actors'] is List) ? (b['actors'] as List).take(3).join('、') : '';
     final why = b['library'] != null
-        ? '根据片库 ${b['library']} 部${b['watched'] != null && b['watched'] != 0 ? '、最近看过 ${b['watched']} 部' : ''}${actors.isEmpty ? '' : '；偏好：$actors'}'
+        ? '根据片库 ${b['library']} 部${b['watched'] != null && b['watched'] != 0 ? '、最近看过 ${b['watched']} 部' : ''}'
+            '${(b['liked'] ?? 0) != 0 ? '、收藏/高分 ${b['liked']} 部' : ''}${(b['disliked'] ?? 0) != 0 ? '，避开屏蔽/低分 ${b['disliked']} 部' : ''}'
+            '${actors.isEmpty ? '' : '；偏好：$actors'}'
         : '';
     return ListView(
       padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), bottomGap(context)),
