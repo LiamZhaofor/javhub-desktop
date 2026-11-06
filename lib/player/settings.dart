@@ -17,6 +17,7 @@ class JavPlayerSettings {
     this.subtitleColor = '#ffffff',
     this.ballX,
     this.ballY,
+    this.autoSubtitle = false,
   });
 
   static const prefsKey = 'javhub.player_settings.v1';
@@ -38,6 +39,10 @@ class JavPlayerSettings {
   double subtitleSize;
   String subtitleColor;
 
+  /// A movie without subtitles of its own: search online by its code when it
+  /// starts and load the first hit.
+  bool autoSubtitle;
+
   /// Ball position as fractions of the player size, so it survives resizes.
   double? ballX;
   double? ballY;
@@ -57,6 +62,7 @@ class JavPlayerSettings {
     'subtitleColor': subtitleColor,
     'ballX': ballX,
     'ballY': ballY,
+    'autoSubtitle': autoSubtitle,
   };
 
   factory JavPlayerSettings.fromJson(Map<String, Object?> j) {
@@ -86,6 +92,7 @@ class JavPlayerSettings {
       subtitleColor: normalizeHexColor(j['subtitleColor']) ?? d.subtitleColor,
       ballX: frac(j['ballX']),
       ballY: frac(j['ballY']),
+      autoSubtitle: j['autoSubtitle'] == true,
     );
   }
 

@@ -115,13 +115,51 @@ class ImageStore {
   }
 }
 
+/// Width / height of a JPEG or PNG from its header; null when it can't tell.
+double? imageAspect(Uint8List b) {
+  if (b.length > 24 && b[0] == 0x89 && b[1] == 0x50) {  // PNG: IHDR
+    final d = ByteData.sublistView(b);
+    final w = d.getUint32(16), h = d.getUint32(20);
+    return h == 0 ? null : w / h;
+  }
+  if (b.length < 4 || b[0] != 0xFF || b[1] != 0xD8) return null;
+  var i = 2;
+  while (i + 9 < b.length) {
+    if (b[i] != 0xFF) {
+      i++;
+      continue;
+    }
+    final m = b[i + 1];
+    if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7) || m == 0xFF) {
+      i += m == 0xFF ? 1 : 2;
+      continue;
+    }
+    final len = (b[i + 2] << 8) | b[i + 3];
+    // SOF0..SOF15, not DHT (C4), JPG (C8), DAC (CC)
+    if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+      final h = (b[i + 5] << 8) | b[i + 6], w = (b[i + 7] << 8) | b[i + 8];
+      return h == 0 ? null : w / h;
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+
+/// A DVD sleeve (back + spine + front) is ~1.49:1; a picture this wide or wider is one
+/// picture (uncensored studios, digital-only releases), with no front half to show.
+const widePicture = 1.6;
+
 class NetImage extends StatefulWidget {
-  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth, this.alignment = Alignment.center});
+  const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth, this.alignment = Alignment.center, this.poster = false});
 
   final String url;
   final BoxFit fit;
   final Alignment alignment;
   final int? decodeWidth;
+
+  /// In a portrait slot: a wide picture is shown whole over a blurred copy of
+  /// itself instead of having a strip cut out of it.
+  final bool poster;
 
   @override
   State<NetImage> createState() => _NetImageState();
@@ -170,6 +208,20 @@ class _NetImageState extends State<NetImage> {
   Widget build(BuildContext context) {
     final b = _bytes;
     if (b == null) return _empty(context, broken: _failed);
+    if (widget.poster && (imageAspect(b) ?? 0) >= widePicture) {
+      return Stack(fit: StackFit.expand, children: [
+        ClipRect(
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: ColorFiltered(
+              colorFilter: const ColorFilter.mode(Color(0x59000000), BlendMode.darken),
+              child: Image.memory(b, fit: BoxFit.cover, cacheWidth: 160, gaplessPlayback: true),
+            ),
+          ),
+        ),
+        Image.memory(b, fit: BoxFit.contain, gaplessPlayback: true, cacheWidth: widget.decodeWidth == null ? null : widget.decodeWidth! * 2),
+      ]);
+    }
     return Image.memory(
       b,
       fit: widget.fit,
@@ -274,7 +326,7 @@ class _PosterTileState extends State<PosterTile> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center),
+                      NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center, poster: true),
                       Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
                       if (widget.corner.isNotEmpty)
                         Positioned(right: 7, bottom: 7, child: Row(mainAxisSize: MainAxisSize.min, spacing: 3, children: widget.corner)),

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../app.dart';
+import '../models.dart';
 import '../platform.dart';
+import '../player/settings.dart';
+import '../widgets.dart' show NetImage, toast;
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.5.1';
+const appVersion = '0.5.2';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -88,6 +91,7 @@ class SettingsPage extends StatelessWidget {
                     title: const Text('字幕'),
                     subtitle: Text('播放器进度条下方的「字幕」按钮：开关字幕、切换字幕轨、按番号在线搜索字幕', style: TextStyle(color: p.muted)),
                   ),
+                  const _AutoSubtitleTile(),
                   ListTile(
                     leading: const Icon(Icons.history_rounded),
                     title: const Text('记住播放位置'),
@@ -98,6 +102,7 @@ class SettingsPage extends StatelessWidget {
                   for (final (keys, what) in const [
                     ('空格', '播放 / 暂停'),
                     ('← / →', '后退 / 前进 10 秒（连按合并为一次跳转）'),
+                    ('→（按住）', '3 倍速，松开恢复（同 Z）'),
                     ('↑ / ↓', '音量'),
                     ('Z（按住）', '3 倍速，松开恢复'),
                     ('X / C', '前进 / 后退 5 秒'),
@@ -115,6 +120,7 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                 ]),
+                section('已屏蔽的影片', [const _BlockedList()]),
                 section('关于', [
                   FutureBuilder<(String, int)>(
                     future: Updater.current(),
@@ -137,5 +143,132 @@ class SettingsPage extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+/// 设置 → 播放: search online by code when a movie without subtitles starts, and load the first.
+class _AutoSubtitleTile extends StatefulWidget {
+  const _AutoSubtitleTile();
+
+  @override
+  State<_AutoSubtitleTile> createState() => _AutoSubtitleTileState();
+}
+
+class _AutoSubtitleTileState extends State<_AutoSubtitleTile> {
+  JavPlayerSettings? _s;
+
+  @override
+  void initState() {
+    super.initState();
+    JavPlayerSettings.load().then((s) {
+      if (mounted) setState(() => _s = s);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _s;
+    return SwitchListTile(
+      secondary: const Icon(Icons.travel_explore_rounded),
+      title: const Text('自动加载在线字幕'),
+      subtitle: Text('打开没有自带字幕的影片时，自动按番号搜索并加载第一个（时长吻合的优先）',
+          style: TextStyle(color: Palette.of(context).muted)),
+      value: s?.autoSubtitle ?? false,
+      onChanged: s == null
+          ? null
+          : (v) async {
+              // the player may have changed other settings since: start from the stored ones
+              final fresh = await JavPlayerSettings.load();
+              fresh.autoSubtitle = v;
+              await fresh.save();
+              if (mounted) setState(() => _s = fresh);
+            },
+    );
+  }
+}
+
+/// 设置 → 已屏蔽的影片: the blocked movies, each with 取消屏蔽.
+class _BlockedList extends StatefulWidget {
+  const _BlockedList();
+
+  @override
+  State<_BlockedList> createState() => _BlockedListState();
+}
+
+class _BlockedListState extends State<_BlockedList> {
+  List<BlockedMovie>? _items;
+  String? _error;
+  bool _expanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final items = await App.api.blocked();
+      if (mounted) setState(() => _items = items);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
+  }
+
+  Future<void> _unblock(BlockedMovie b) async {
+    try {
+      await App.api.block(b.code, false);
+      if (!mounted) return;
+      setState(() => _items = [...?_items]..remove(b));
+      toast(context, '已取消屏蔽 ${b.code}');
+      Shell.refresh();
+    } catch (e) {
+      if (mounted) toast(context, '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final items = _items;
+    if (items == null) {
+      return ListTile(
+        leading: const Icon(Icons.block_rounded),
+        title: Text(_error ?? '加载中…', style: TextStyle(color: _error == null ? p.muted : accent)),
+      );
+    }
+    if (items.isEmpty) {
+      return ListTile(
+        leading: const Icon(Icons.block_rounded),
+        title: const Text('没有屏蔽的影片'),
+        subtitle: Text('影片页右上角 ⋯ → 屏蔽，或搜索结果里的「屏蔽」', style: TextStyle(color: p.muted)),
+      );
+    }
+    final shown = _expanded ? items : items.take(5).toList();
+    return Column(children: [
+      for (final b in shown)
+        ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: SizedBox(
+              width: 36,
+              height: 52,
+              child: NetImage(
+                b.item != null && b.poster
+                    ? App.api.media(b.item!, 'poster.jpg', width: 240, version: b.posterVersion)
+                    : (b.cover.isEmpty ? '' : App.api.image(b.cover)),
+                decodeWidth: 120,
+                alignment: Alignment.centerRight,
+                poster: true,
+              ),
+            ),
+          ),
+          title: Text(b.code, style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: b.title.isEmpty ? null : Text(b.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted)),
+          trailing: OutlinedButton(onPressed: () => _unblock(b), child: const Text('取消屏蔽')),
+        ),
+      if (items.length > shown.length)
+        TextButton(onPressed: () => setState(() => _expanded = true), child: Text('显示全部 ${items.length} 部')),
+    ]);
   }
 }

@@ -189,8 +189,8 @@ class JavPlayerTools extends ChangeNotifier {
       return false;
     }
     if (label == settings.accelerateKey) {
-      if (event is KeyDownEvent) unawaited(_startAcceleration());
-      if (event is KeyUpEvent) unawaited(_stopAcceleration());
+      if (event is KeyDownEvent) unawaited(startAcceleration());
+      if (event is KeyUpEvent) unawaited(stopAcceleration());
       return true;
     }
     final isForward = label == settings.forwardKey;
@@ -202,7 +202,7 @@ class JavPlayerTools extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _startAcceleration() async {
+  Future<void> startAcceleration() async {
     if (_accelerating) return;
     _accelerating = true;
     _speedBeforeAcceleration = player.state.rate;
@@ -210,7 +210,7 @@ class JavPlayerTools extends ChangeNotifier {
     await player.setRate(settings.accelerationRate);
   }
 
-  Future<void> _stopAcceleration() async {
+  Future<void> stopAcceleration() async {
     if (!_accelerating) return;
     _accelerating = false;
     notifyListeners();

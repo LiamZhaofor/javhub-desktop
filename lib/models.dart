@@ -273,6 +273,32 @@ class Job {
   ];
 }
 
+class BlockedMovie {
+  const BlockedMovie({required this.code, this.title = '', this.cover = '', this.item, this.poster = false, this.posterVersion = 0, this.at = 0});
+
+  factory BlockedMovie.fromJson(Map<String, dynamic> j) => BlockedMovie(
+    code: '${j['code'] ?? ''}',
+    title: '${j['title'] ?? ''}',
+    cover: '${j['cover'] ?? ''}',
+    item: j['item'] as String?,
+    poster: j['poster'] == true,
+    posterVersion: (j['pv'] as num?)?.toInt() ?? 0,
+    at: (j['at'] as num?)?.toDouble() ?? 0,
+  );
+
+  final String code;
+  final String title;
+
+  /// A movie site's cover (not in the library); '' when it is a library item.
+  final String cover;
+
+  /// The library item, while it is in the library.
+  final String? item;
+  final bool poster;
+  final int posterVersion;
+  final double at;
+}
+
 class Rec {
   Rec(this.j);
 

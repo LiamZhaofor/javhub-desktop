@@ -74,6 +74,16 @@ class JavHubApi {
   /// Something else (a picture) found the home address unreachable.
   void dropLan() => _lanFailed();
 
+  /// The home address another window already found working (a player window).
+  void useLan(String lanBase) {
+    _lanBase = lanBase;
+    _lanUrl = lanBase;
+    lan = true;
+  }
+
+  /// The home address in use, if any.
+  String? get lanBase => _lanBase;
+
   /// Called when the server says the session is gone.
   void Function()? onUnauthorized;
 
@@ -313,6 +323,15 @@ class JavHubApi {
   }
 
   Future<void> follow(String name, bool on) => _put('/api/actors/${Uri.encodeComponent(name)}/follow', {'on': on});
+
+  // ---------------- blocked (屏蔽) ----------------
+
+  /// Kept out of the library, home, recommendations and actress pages until unblocked.
+  Future<List<BlockedMovie>> blocked() async =>
+      [for (final b in (await get('/api/blocked'))['items'] as List? ?? const []) BlockedMovie.fromJson(b as Map<String, dynamic>)];
+
+  Future<void> block(String code, bool on, {String item = '', String title = '', String cover = ''}) =>
+      _put('/api/blocked/${Uri.encodeComponent(code)}', {'on': on, if (item.isNotEmpty) 'item': item, if (title.isNotEmpty) 'title': title, if (cover.isNotEmpty) 'cover': cover});
 
   // ---------------- recommendations / wishlist ----------------
 

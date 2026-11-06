@@ -5,15 +5,22 @@ import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'player/player_window.dart';
 
 // --dart-define=JAVHUB_PHONE=true: a phone-sized window, to try the phone layout on a PC
 const _phone = bool.fromEnvironment('JAVHUB_PHONE');
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     runApp(const App());
+    return;
+  }
+  // a movie in a window of its own (started by the main window)
+  final player = args.indexOf('--player');
+  if (player >= 0 && player + 1 < args.length) {
+    await runPlayerWindow(args[player + 1]);
     return;
   }
   await windowManager.ensureInitialized();
@@ -30,5 +37,6 @@ Future<void> main() async {
       await windowManager.focus();
     },
   );
+  await PlayerWindows.watchMainWindow();
   runApp(const App());
 }

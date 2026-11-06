@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../app.dart';
 import '../models.dart';
@@ -17,13 +18,41 @@ import 'stream_proxy.dart';
 import 'tools.dart';
 
 class PlaySource {
-  const PlaySource({required this.url, required this.cloud});
+  const PlaySource({required this.url, required this.cloud, this.local = false});
 
   final String url;
 
   /// A 115 file: played through the loopback proxy straight from the CDN.
   final bool cloud;
+
+  /// [url] already is the loopback proxy's (the main window's, for a player window).
+  final bool local;
 }
+
+/// Where a movie was left: JavHub's shared progress (any device, Emby included),
+/// else this device's own note of it (offline). (0, '') = from the start.
+Future<(int, String)> resumePosition({required String itemId, required int part, required String url, bool resume = true}) async {
+  if (!resume) return (0, '');
+  if (itemId.isNotEmpty) {
+    Progress? remote;
+    var asked = false;
+    try {
+      remote = (await App.api.progress(itemId).timeout(const Duration(seconds: 6)))[part];
+      asked = true;
+    } catch (_) {}
+    if (asked) {
+      if (remote == null || !remote.resumable) return (0, '');
+      final pos = remote.pos.floor();
+      if (pos < 30 || (remote.dur > 0 && pos > remote.dur - 60)) return (0, '');
+      return (pos, remote.device);
+    }
+  }
+  final saved = (await SharedPreferences.getInstance()).getInt(positionKey(url)) ?? 0;
+  return saved >= 30 ? (saved, '') : (0, '');
+}
+
+/// This device's own note of where [url] was left.
+String positionKey(String url) => 'pos.${url.split('?').first}';
 
 enum _Panel { subtitles, speed, settings }
 
@@ -40,7 +69,15 @@ class PlayerPage extends StatefulWidget {
     this.part = 0,
     this.resume = true,
     this.subtitles = const [],
+    this.startAt,
+    this.windowed = false,
   });
+
+  /// Where to start, already worked out (seconds, device); null: look it up.
+  final (int, String)? startAt;
+
+  /// The only thing in a window of its own: back / Esc closes the window.
+  final bool windowed;
 
   final String title;
   final String code;
@@ -62,7 +99,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage> with WindowListener {
   late final Player _player = Player(
     configuration: PlayerConfiguration(
       title: widget.title,
@@ -103,11 +140,19 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _searching = false;
   String? _searchError;
 
-  String get _posKey => 'pos.${widget.source.url.split('?').first}';
+  String get _posKey => positionKey(widget.source.url);
+
+  // → held down: speed up like the accelerate key; tapped: forward 10 s
+  Timer? _rightHold;
+  bool _rightAccelerating = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.windowed) {
+      windowManager.addListener(this);
+      unawaited(windowManager.setPreventClose(true));
+    }
     unawaited(_start());
     if (widget.itemId.isNotEmpty) unawaited(_loadPreviews());
     if (!isDesktop) {
@@ -183,10 +228,12 @@ class _PlayerPageState extends State<PlayerPage> {
     // where to start, asked while the stream is being set up: mpv then opens right
     // there instead of playing from 0:00 and seeking (one CDN round trip less)
     trace('play pressed');
-    final startAt = _startPosition();
+    final startAt = widget.startAt != null
+        ? Future.value(widget.startAt!)
+        : resumePosition(itemId: widget.itemId, part: widget.part, url: widget.source.url, resume: widget.resume);
     var url = widget.source.url;
-    var headers = App.api.authHeaders;
-    if (widget.source.cloud) {
+    var headers = widget.source.local ? const <String, String>{} : App.api.authHeaders;
+    if (widget.source.cloud && !widget.source.local) {
       setState(() => _status = '正在连接 115…');
       final local = await JavStreamProxy.instance.wrap(url, headers: App.api.authHeaders);
       if (local != url) {
@@ -212,28 +259,39 @@ class _PlayerPageState extends State<PlayerPage> {
     for (final (name, subUrl) in widget.subtitles.reversed) {
       await _tools.loadRemoteFile(name, subUrl, App.api.authHeaders);
     }
+    if (_tools.settings.autoSubtitle && widget.subtitles.isEmpty) unawaited(_autoSubtitle());
   }
 
-  /// Where this movie was left: JavHub's shared progress (any device, Emby included),
-  /// else this device's own note of it (offline). (0, '') = from the start.
-  Future<(int, String)> _startPosition() async {
-    if (!widget.resume) return (0, '');
-    if (widget.itemId.isNotEmpty) {
-      Progress? remote;
-      var asked = false;
-      try {
-        remote = (await App.api.progress(widget.itemId).timeout(const Duration(seconds: 6)))[widget.part];
-        asked = true;
-      } catch (_) {}
-      if (asked) {
-        if (remote == null || !remote.resumable) return (0, '');
-        final pos = remote.pos.floor();
-        if (pos < 30 || (remote.dur > 0 && pos > remote.dur - 60)) return (0, '');
-        return (pos, remote.device);
-      }
+  /// 设置 → 自动加载在线字幕: a movie without subtitles of its own gets the first
+  /// online one (the ones made for a video of this length come first).
+  Future<void> _autoSubtitle() async {
+    if (widget.code.isEmpty) return;
+    // the length decides which come first: wait for it (a moment after opening)
+    for (var i = 0; i < 40 && mounted && _player.state.duration <= Duration.zero; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
-    final saved = (await SharedPreferences.getInstance()).getInt(_posKey) ?? 0;
-    return saved >= 30 ? (saved, '') : (0, '');
+    // the file has subtitles inside it: those are shown, nothing to fetch
+    final inside = _player.state.tracks.subtitle.where((t) => t.id != 'auto' && t.id != 'no');
+    if (!mounted || inside.isNotEmpty) return;
+    await _searchOnline();
+    final found = _online;
+    if (!mounted || found == null) return;
+    if (found.isEmpty) {
+      _tools.toast('没有找到 ${widget.code} 的在线字幕');
+      return;
+    }
+    await _tools.loadOnlineSubtitle(found.first);
+    if (mounted) setState(() {});
+  }
+
+  // ---------------- its own window ----------------
+
+  @override
+  void onWindowClose() => unawaited(_closeWindow());
+
+  Future<void> _closeWindow() async {
+    if (_resumeDone) await _savePosition().timeout(const Duration(seconds: 3), onTimeout: () {});
+    await windowManager.destroy();
   }
 
   static String get _device => Platform.isAndroid ? 'Android' : (Platform.isWindows ? 'Windows' : Platform.operatingSystem);
@@ -243,12 +301,16 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _savePosition() async {
     final pos = _lastPos.inSeconds;
     final duration = _player.state.duration.inSeconds;
-    final p = await SharedPreferences.getInstance();
-    // finished (or barely started): next time from the start
-    if (pos > 30 && (duration == 0 || pos < duration - 60)) {
-      await p.setInt(_posKey, pos);
-    } else {
-      await p.remove(_posKey);
+    // (a player window leaves the settings file to the main window: two processes
+    // writing it would undo each other's changes; JavHub keeps the position)
+    if (!widget.windowed) {
+      final p = await SharedPreferences.getInstance();
+      // finished (or barely started): next time from the start
+      if (pos > 30 && (duration == 0 || pos < duration - 60)) {
+        await p.setInt(_posKey, pos);
+      } else {
+        await p.remove(_posKey);
+      }
     }
     // the shared progress: the other devices (and the home page) go on from here
     if (widget.itemId.isNotEmpty && duration > 0 && pos > 0) {
@@ -261,6 +323,8 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     if (_resumeDone) unawaited(_savePosition());
+    if (widget.windowed) windowManager.removeListener(this);
+    _rightHold?.cancel();
     _statsTimer?.cancel();
     _hoverIdle?.cancel();
     for (final s in _subs) {
@@ -286,6 +350,8 @@ class _PlayerPageState extends State<PlayerPage> {
       _panel.value = null;
     } else if (isFullscreen(context)) {
       unawaited(exitFullscreen(context));
+    } else if (widget.windowed) {
+      unawaited(_closeWindow());
     } else {
       Navigator.of(this.context).maybePop();
     }
@@ -370,9 +436,31 @@ class _PlayerPageState extends State<PlayerPage> {
   KeyEventResult _onKey(BuildContext context, KeyEvent e) {
     if (_tools.handleKey(e)) return KeyEventResult.handled;
     final key = e.logicalKey;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      // tapped: forward 10 s (on release); held: the accelerate key's speed-up
+      if (e is KeyDownEvent) {
+        _rightHold?.cancel();
+        _rightAccelerating = false;
+        _rightHold = Timer(const Duration(milliseconds: 350), () {
+          _rightAccelerating = true;
+          unawaited(_tools.startAcceleration());
+        });
+      } else if (e is KeyUpEvent) {
+        final held = _rightHold != null;
+        _rightHold?.cancel();
+        _rightHold = null;
+        if (_rightAccelerating) {
+          unawaited(_tools.stopAcceleration());
+        } else if (held) {
+          _tools.queueSeek(10);
+        }
+        _rightAccelerating = false;
+      }
+      return KeyEventResult.handled;
+    }
     if (e is KeyDownEvent || e is KeyRepeatEvent) {
-      if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.arrowRight) {
-        _tools.queueSeek(key == LogicalKeyboardKey.arrowLeft ? -10 : 10);
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        _tools.queueSeek(-10);
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
@@ -775,7 +863,7 @@ class _PlayerPageState extends State<PlayerPage> {
     bottomButtonBar: [
       const MaterialDesktopPlayOrPauseButton(),
       _BarButton(icon: Icons.replay_10_rounded, tooltip: '后退 10 秒 (←)', onPressed: () => _tools.queueSeek(-10)),
-      _BarButton(icon: Icons.forward_10_rounded, tooltip: '前进 10 秒 (→)', onPressed: () => _tools.queueSeek(10)),
+      _BarButton(icon: Icons.forward_10_rounded, tooltip: '前进 10 秒 (→，按住加速)', onPressed: () => _tools.queueSeek(10)),
       const MaterialDesktopVolumeButton(),
       const MaterialDesktopPositionIndicator(),
       const Spacer(),

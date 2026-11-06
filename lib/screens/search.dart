@@ -215,16 +215,17 @@ class SearchPageState extends State<SearchPage> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: isCompact(context) ? 220 : 300,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              childAspectRatio: 1.15,
+              maxCrossAxisExtent: isCompact(context) ? 140 : 186,
+              mainAxisSpacing: isCompact(context) ? 14 : 22,
+              crossAxisSpacing: isCompact(context) ? 10 : 18,
+              childAspectRatio: 0.565,
             ),
             itemCount: page.length,
             itemBuilder: (context, i) {
               final rec = page[i];
               return PosterTile(
                 image: rec.cover.isEmpty ? '' : App.api.image(rec.cover),
+                cover: true,
                 code: rec.code,
                 subtitle: rec.reasons.isEmpty ? rec.title : rec.reasons.first,
                 badges: [
@@ -390,6 +391,30 @@ class SearchPageState extends State<SearchPage> {
                       label: const Text('加入想看（等中字）'),
                     ),
                     TextButton(onPressed: () => search(d.code, refresh: true), child: const Text('重新抓取')),
+                    TextButton.icon(
+                      onPressed: () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (c) => AlertDialog(
+                            title: Text('屏蔽 ${d.code}？'),
+                            content: const Text('它不会再出现在推荐、首页和演员页里。可以在 设置 → 已屏蔽的影片 里取消屏蔽。'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+                              FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('屏蔽')),
+                            ],
+                          ),
+                        );
+                        if (ok != true) return;
+                        try {
+                          await App.api.block(d.code, true, title: m.title, cover: m.cover);
+                          if (mounted) toast(context, '已屏蔽 ${d.code}');
+                        } catch (e) {
+                          if (mounted) toast(context, '$e');
+                        }
+                      },
+                      icon: const Icon(Icons.block_rounded, size: 18),
+                      label: const Text('屏蔽'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),

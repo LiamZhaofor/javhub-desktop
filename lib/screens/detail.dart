@@ -3,11 +3,13 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../app.dart';
 import '../models.dart';
 import '../platform.dart';
 import '../player/player_page.dart';
+import '../player/player_window.dart';
 import '../player/stream_proxy.dart';
 import '../widgets.dart';
 import 'actor.dart';
@@ -94,6 +96,8 @@ class _DetailPageState extends State<DetailPage> {
     builder: (_) => _StillViewer(urls: [for (final s in _stills) _still(s)], start: start),
   );
 
+  bool _opening = false;
+
   void _play(int i, {bool resume = true}) {
     final PlaySource source;
     if (it.cloud) {
@@ -106,6 +110,10 @@ class _DetailPageState extends State<DetailPage> {
     } else {
       source = PlaySource(url: App.api.media(it.id, it.videos[i]), cloud: false);
     }
+    if (isDesktop) {
+      unawaited(_playInWindow(i, source, resume));
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => PlayerPage(
         title: it.videos.length > 1 ? '${it.folder} (${i + 1})' : it.folder,
@@ -117,6 +125,51 @@ class _DetailPageState extends State<DetailPage> {
         subtitles: [for (final s in it.subs) (s, App.api.media(it.id, s))],
       ),
     )).then((_) => Future<void>.delayed(const Duration(milliseconds: 600), _loadProgress));
+  }
+
+  /// Windows: the movie plays in a window of its own. The stream is got ready here
+  /// (this window prepared it while the page was read) and handed over as a
+  /// loopback address, with where to start.
+  Future<void> _playInWindow(int i, PlaySource source, bool resume) async {
+    if (_opening || PlayerWindows.focus(it.id, i)) return;
+    setState(() => _opening = true);
+    try {
+      final title = it.videos.length > 1 ? '${it.folder} (${i + 1})' : it.folder;
+      final start = resumePosition(itemId: it.id, part: i, url: source.url, resume: resume);
+      var play = source;
+      if (source.cloud) {
+        final local = await JavStreamProxy.instance.wrap(source.url, headers: App.api.authHeaders);
+        if (local != source.url) play = PlaySource(url: local, cloud: true, local: true);
+      }
+      final (pos, from) = await start;
+      final bounds = await windowManager.getBounds();
+      final maximized = await windowManager.isMaximized();
+      await PlayerWindows.open(
+        PlayerArgs(
+          title: title,
+          code: it.code,
+          itemId: it.id,
+          part: i,
+          source: play,
+          subtitles: [for (final s in it.subs) (s, App.api.media(it.id, s))],
+          start: pos,
+          from: from,
+          lanBase: App.api.lanBase,
+          bounds: bounds,
+          maximized: maximized,
+        ),
+        onClosed: () {
+          Future<void>.delayed(const Duration(milliseconds: 600), () {
+            if (mounted) unawaited(_loadProgress());
+            Shell.refresh();
+          });
+        },
+      );
+    } catch (e) {
+      if (mounted) toast(context, '无法打开播放窗口: $e');
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
   }
 
   Widget _chip(String text, {IconData? icon, VoidCallback? onTap}) => ActionChip(
@@ -178,6 +231,29 @@ class _DetailPageState extends State<DetailPage> {
       final code = await _askCode();
       if (code == null) return;
       body = {'code': code};
+    } else if (act == 'block') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('屏蔽 ${it.code}？'),
+          content: const Text('它不会再出现在片库、首页、推荐和演员页里。可以在 设置 → 已屏蔽的影片 里取消屏蔽。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('屏蔽')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      try {
+        await App.api.block(it.code, true, item: it.id, title: it.title);
+        if (!mounted) return;
+        toast(context, '已屏蔽 ${it.code}');
+        Shell.refresh();
+        Navigator.of(context).maybePop();
+      } catch (e) {
+        if (mounted) toast(context, '$e');
+      }
+      return;
     } else if (act == 'remove') {
       final ok = await showDialog<bool>(
         context: context,
@@ -287,6 +363,7 @@ class _DetailPageState extends State<DetailPage> {
                             PopupMenuItem(value: 'rescrape', child: ListTile(leading: Icon(Icons.auto_fix_high_rounded), title: Text('重新刮削'), subtitle: Text('清除封面和资料重新获取'))),
                             PopupMenuItem(value: 'recode', child: ListTile(leading: Icon(Icons.edit_rounded), title: Text('改番号…'), subtitle: Text('番号认错了'))),
                             PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.remove_circle_outline_rounded, color: accent), title: Text('从片库移除'))),
+                            PopupMenuItem(value: 'block', child: ListTile(leading: Icon(Icons.block_rounded), title: Text('屏蔽'), subtitle: Text('不再出现在片库、首页和推荐里'))),
                           ],
                         ),
                       ]),
@@ -325,8 +402,10 @@ class _DetailPageState extends State<DetailPage> {
                             Wrap(spacing: 10, runSpacing: 10, children: [
                               for (var i = 0; i < it.videos.length; i++) ...[
                                 FilledButton.icon(
-                                  onPressed: () => _play(i),
-                                  icon: const Icon(Icons.play_arrow_rounded),
+                                  onPressed: _opening ? null : () => _play(i),
+                                  icon: _opening
+                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : const Icon(Icons.play_arrow_rounded),
                                   label: Text([
                                     if (_progress[i]?.resumable ?? false) '继续 ${fmtClock(Duration(seconds: _progress[i]!.pos.floor()))}' else '播放',
                                     if (it.videos.length > 1) '${i + 1}',

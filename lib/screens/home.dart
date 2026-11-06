@@ -144,18 +144,22 @@ class HomePageState extends State<HomePage> {
                 _Row(
                   title: '每日新片推荐',
                   subtitle: '片库里没有的，点开去搜索下载',
-                  height: 222,
+                  height: 318,
                   children: [
                     for (final r in home.recs)
-                      _WideCard(
-                        image: App.api.image(r.cover),
-                        title: r.code,
-                        subtitle: r.reasons.isEmpty ? r.title : r.reasons.first,
-                        badges: [
-                          if (r.subMagnet) const Badge2('中字磁链'),
-                          if (r.rating > 0) Badge2('★ ${r.rating.toStringAsFixed(1)}', color: badgeDark),
-                        ],
-                        onTap: () => Shell.search(context, r.code),
+                      SizedBox(
+                        width: 170,
+                        child: PosterTile(
+                          image: App.api.image(r.cover),
+                          cover: true,
+                          code: r.code,
+                          subtitle: r.reasons.isEmpty ? r.title : r.reasons.first,
+                          badges: [
+                            if (r.subMagnet) const Badge2('中字磁链'),
+                            if (r.rating > 0) Badge2('★ ${r.rating.toStringAsFixed(1)}', color: badgeDark),
+                          ],
+                          onTap: () => Shell.search(context, r.code),
+                        ),
                       ),
                   ],
                 ),
@@ -287,16 +291,12 @@ class _RowState extends State<_Row> {
   }
 }
 
-/// A 16:9 card: a movie's fanart (or a recommendation's cover), title, and how far it was watched.
+/// A 16:9 card: a movie's fanart, title, and how far it was watched.
 class _WideCard extends StatefulWidget {
-  const _WideCard({this.item, this.progress, this.image, this.title, this.subtitle, this.badges = const [], required this.onTap});
+  const _WideCard({this.item, this.progress, required this.onTap});
 
   final LibraryItem? item;
   final double? progress;
-  final String? image;
-  final String? title;
-  final String? subtitle;
-  final List<Widget> badges;
   final VoidCallback onTap;
 
   @override
@@ -311,14 +311,13 @@ class _WideCardState extends State<_WideCard> {
     final p = Palette.of(context);
     final it = widget.item;
     final image =
-        widget.image ??
         (it == null
             ? ''
             : it.fanart
             ? App.api.media(it.id, 'fanart.jpg', width: 480, version: it.posterVersion)
             : (it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : ''));
-    final title = widget.title ?? it?.folder ?? '';
-    final subtitle = widget.subtitle ?? (it == null ? '' : [if (it.watchedAt > 0) '${fmtAgo(it.watchedAt)}看过', it.shortTitle].join(' · '));
+    final title = it?.folder ?? '';
+    final subtitle = (it == null ? '' : [if (it.watchedAt > 0) '${fmtAgo(it.watchedAt)}看过', it.shortTitle].join(' · '));
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -362,7 +361,6 @@ class _WideCardState extends State<_WideCard> {
                               child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
                             ),
                           ),
-                        Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, children: widget.badges)),
                         if (widget.progress != null)
                           Positioned(
                             left: 0,
