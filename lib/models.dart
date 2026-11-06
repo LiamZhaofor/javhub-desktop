@@ -273,6 +273,57 @@ class Job {
   ];
 }
 
+/// One of the followed actresses' new movies (JavDB).
+class ReleaseItem {
+  const ReleaseItem({required this.code, this.title = '', this.cover = '', this.date = '', this.actor = '', this.magnet = '', this.read = false, this.inLibrary, this.wished = false});
+
+  factory ReleaseItem.fromJson(Map<String, dynamic> j) => ReleaseItem(
+    code: '${j['code'] ?? ''}',
+    title: '${j['title'] ?? ''}',
+    cover: '${j['cover'] ?? ''}',
+    date: '${j['date'] ?? ''}',
+    actor: '${j['actor'] ?? ''}',
+    magnet: '${j['magnet'] ?? ''}',
+    read: j['read'] == true,
+    inLibrary: j['in_library'] as String?,
+    wished: j['wished'] == true,
+  );
+
+  final String code;
+  final String title;
+  final String cover;
+  final String date;
+  final String actor;
+
+  /// 'sub': a magnet with Chinese subtitles, 'yes': a magnet, '': none yet.
+  final String magnet;
+  final bool read;
+  final String? inLibrary;
+  final bool wished;
+}
+
+class Releases {
+  const Releases({this.items = const [], this.unread = 0, this.lastCheck = 0, this.error = '', this.follows = 0, this.autoWish = false, this.checking = false});
+
+  factory Releases.fromJson(Map<String, dynamic> j) => Releases(
+    items: [for (final r in j['items'] as List? ?? const []) ReleaseItem.fromJson(r as Map<String, dynamic>)],
+    unread: (j['unread'] as num?)?.toInt() ?? 0,
+    lastCheck: (j['last_check'] as num?)?.toDouble() ?? 0,
+    error: '${j['error'] ?? ''}',
+    follows: (j['follows'] as num?)?.toInt() ?? 0,
+    autoWish: (j['settings'] as Map?)?['auto_wish'] == true,
+    checking: j['checking'] == true,
+  );
+
+  final List<ReleaseItem> items;
+  final int unread;
+  final double lastCheck;
+  final String error;
+  final int follows;
+  final bool autoWish;
+  final bool checking;
+}
+
 class BlockedMovie {
   const BlockedMovie({required this.code, this.title = '', this.cover = '', this.item, this.poster = false, this.posterVersion = 0, this.at = 0});
 

@@ -10,6 +10,9 @@ import 'actor.dart';
 import 'detail.dart';
 import 'wishlist.dart';
 
+/// 收藏's segments.
+const _segMovies = 0, _segActors = 1, _segWish = 2, _segNew = 3;
+
 /// 收藏: the movies marked ♥, the actresses followed, and the 想看 list (codes searched
 /// for and downloaded when they turn up).
 class FavoritesPage extends StatefulWidget {
@@ -20,9 +23,11 @@ class FavoritesPage extends StatefulWidget {
 }
 
 class FavoritesPageState extends State<FavoritesPage> {
-  int _seg = 0; // 影片 | 演员 | 想看下载
+  int _seg = _segMovies;
   List<LibraryItem> _all = [];
   Map<String, Map<String, dynamic>> _follows = {};
+  Releases? _releases;
+  Timer? _checking;
   String? _error;
   bool _loading = false;
 
@@ -36,18 +41,60 @@ class FavoritesPageState extends State<FavoritesPage> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final r = await Future.wait([App.api.library(), App.api.follows()]);
+      final r = await Future.wait([App.api.library(), App.api.follows(), App.api.releases()]);
       if (!mounted) return;
       setState(() {
         _all = r[0] as List<LibraryItem>;
         _follows = r[1] as Map<String, Map<String, dynamic>>;
+        _releases = r[2] as Releases;
         _error = null;
       });
+      Shell.setNewReleases(_releases!.unread);
+      if (_seg == _segNew) unawaited(_markRead());
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _checking?.cancel();
+    super.dispose();
+  }
+
+  /// The 新 marks stay on screen until the next visit; the badge goes now.
+  Future<void> _markRead() async {
+    if ((_releases?.unread ?? 0) == 0) return;
+    try {
+      await App.api.releasesRead();
+      Shell.setNewReleases(0);
+    } catch (_) {}
+  }
+
+  Future<void> _checkNow() async {
+    try {
+      final r = await App.api.releasesCheck();
+      if (mounted) setState(() => _releases = r);
+    } catch (e) {
+      if (mounted) toast(context, '$e');
+      return;
+    }
+    // a look at every followed actress takes a while (15 s apart): follow it
+    _checking?.cancel();
+    _checking = Timer.periodic(const Duration(seconds: 5), (t) async {
+      try {
+        final r = await App.api.releases();
+        if (!mounted) return t.cancel();
+        setState(() => _releases = r);
+        if (!r.checking) {
+          t.cancel();
+          Shell.setNewReleases(_seg == _segNew ? 0 : r.unread);
+          if (_seg == _segNew) unawaited(_markRead());
+        }
+      } catch (_) {}
+    });
   }
 
   @override
@@ -72,20 +119,33 @@ class FavoritesPageState extends State<FavoritesPage> {
           child: SegmentedButton<int>(
             showSelectedIcon: false,
             segments: [
-              ButtonSegment(value: 0, icon: const Icon(Icons.favorite_rounded, size: 18), label: Text('影片 ${favs.length}')),
-              ButtonSegment(value: 1, icon: const Icon(Icons.person_rounded, size: 18), label: Text('演员 ${_follows.length}')),
-              const ButtonSegment(value: 2, icon: Icon(Icons.download_for_offline_outlined, size: 18), label: Text('想看下载')),
+              ButtonSegment(value: _segMovies, icon: const Icon(Icons.favorite_rounded, size: 18), label: Text('影片 ${favs.length}')),
+              ButtonSegment(value: _segActors, icon: const Icon(Icons.person_rounded, size: 18), label: Text('演员 ${_follows.length}')),
+              ButtonSegment(
+                value: _segNew,
+                icon: Badge(
+                  isLabelVisible: (_releases?.unread ?? 0) > 0,
+                  label: Text('${_releases?.unread ?? 0}'),
+                  child: const Icon(Icons.new_releases_outlined, size: 18),
+                ),
+                label: const Text('新片'),
+              ),
+              const ButtonSegment(value: _segWish, icon: Icon(Icons.download_for_offline_outlined, size: 18), label: Text('想看下载')),
             ],
             selected: {_seg},
-            onSelectionChanged: (s) => setState(() => _seg = s.first),
+            onSelectionChanged: (s) {
+              setState(() => _seg = s.first);
+              if (_seg == _segNew) unawaited(_markRead());
+            },
           ),
         ),
       ),
       Expanded(
         child: switch (_seg) {
-          2 => const WishlistPage(embedded: true),
+          _segWish => const WishlistPage(embedded: true),
           _ when _error != null && _all.isEmpty => ErrorBox(_error!, onRetry: reload),
-          1 => _actors(),
+          _segActors => _actors(),
+          _segNew => _newReleases(),
           _ => _movies(favs),
         },
       ),
@@ -165,6 +225,82 @@ class FavoritesPageState extends State<FavoritesPage> {
         );
       },
     );
+  }
+
+  Widget _newReleases() {
+    final p = Palette.of(context);
+    final r = _releases;
+    if (r == null) return const Center(child: CircularProgressIndicator());
+    final info = [
+      if (r.follows == 0) '还没有关注的演员：在演员页点“关注”后，她的新片会出现在这里' else '每 12 小时检查一次关注的 ${r.follows} 位演员',
+      if (r.lastCheck > 0) '上次检查 ${fmtAgo(r.lastCheck)}',
+      if (r.checking) '检查中…',
+    ].join(' · ');
+    final head = Padding(
+      padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), 10),
+      child: Wrap(spacing: 12, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        Text(info, style: TextStyle(color: p.muted, fontSize: 12.5)),
+        if (r.error.isNotEmpty) Text(r.error, style: const TextStyle(color: accent, fontSize: 12.5)),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Switch(
+            value: r.autoWish,
+            onChanged: (v) async {
+              try {
+                await App.api.releasesSettings(autoWish: v);
+                await reload();
+                if (mounted) toast(context, v ? '新片会自动加入想看清单（等有中字资源后下载）' : '不再自动加入想看');
+              } catch (e) {
+                if (mounted) toast(context, '$e');
+              }
+            },
+          ),
+          Text('自动加入想看', style: TextStyle(color: p.text, fontSize: 13)),
+        ]),
+        OutlinedButton.icon(
+          onPressed: r.checking || r.follows == 0 ? null : _checkNow,
+          icon: r.checking
+              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('立即检查'),
+        ),
+      ]),
+    );
+    if (r.items.isEmpty) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        head,
+        if (r.follows > 0) const Expanded(child: EmptyHint('暂时没有新片。出现后会显示在这里，「收藏」上会有数字提醒', icon: Icons.new_releases_outlined)),
+      ]);
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      head,
+      Expanded(
+        child: GridView.builder(
+          padding: EdgeInsets.fromLTRB(pagePad(context), 4, pagePad(context), bottomGap(context)),
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: isCompact(context) ? 140 : 186,
+            mainAxisSpacing: isCompact(context) ? 14 : 22,
+            crossAxisSpacing: isCompact(context) ? 10 : 18,
+            childAspectRatio: 0.565,
+          ),
+          itemCount: r.items.length,
+          itemBuilder: (context, i) {
+            final w = r.items[i];
+            return PosterTile(
+              image: w.cover.isEmpty ? '' : App.api.image(w.cover),
+              cover: true,
+              code: w.code,
+              subtitle: [w.actor, if (w.date.isNotEmpty) w.date].join(' · '),
+              badges: [
+                if (!w.read) const Badge2('新'),
+                if (w.inLibrary != null) const Badge2('片库已有', color: Color(0xFF16A34A)) else if (w.wished) const Badge2('想看', color: badgeBlue),
+                if (w.magnet == 'sub') const Badge2('中字磁链', color: badgeDark),
+              ],
+              onTap: () => Shell.search(context, w.code),
+            );
+          },
+        ),
+      ),
+    ]);
   }
 
   double _since(String name) {

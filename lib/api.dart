@@ -324,6 +324,13 @@ class JavHubApi {
 
   Future<void> follow(String name, bool on) => _put('/api/actors/${Uri.encodeComponent(name)}/follow', {'on': on});
 
+  // ---------------- 新片 (the followed actresses' new movies) ----------------
+
+  Future<Releases> releases() async => Releases.fromJson(await get('/api/releases'));
+  Future<Releases> releasesRead() async => Releases.fromJson(await post('/api/releases/read', {}));
+  Future<Releases> releasesCheck() async => Releases.fromJson(await post('/api/releases/check'));
+  Future<void> releasesSettings({required bool autoWish}) => _put('/api/releases/settings', {'auto_wish': autoWish});
+
   // ---------------- blocked (屏蔽) ----------------
 
   /// Kept out of the library, home, recommendations and actress pages until unblocked.

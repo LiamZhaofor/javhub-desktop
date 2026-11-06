@@ -224,6 +224,9 @@ class Shell extends StatefulWidget {
   static void filterLibrary(BuildContext context, String query) =>
       (context.findAncestorStateOfType<_ShellState>() ?? _ShellState._current)?._openLibrary(query);
 
+  /// 收藏's badge: how many of the followed actresses' new movies are unseen.
+  static void setNewReleases(int n) => _ShellState.setNewReleases(n);
+
   /// The library and the home page fetch the list again (a movie was fixed / removed).
   static void refresh() {
     final s = _ShellState._current;
@@ -263,6 +266,20 @@ class _ShellState extends State<Shell> {
   final _favKey = GlobalKey<FavoritesPageState>();
   int _activeJobs = 0;
   Timer? _jobsTimer;
+  int _newReleases = 0;
+  Timer? _releasesTimer;
+
+  /// 收藏's badge: the followed actresses' new movies not seen yet.
+  static void setNewReleases(int n) {
+    final s = _current;
+    if (s != null && s.mounted && s._newReleases != n) s.setState(() => s._newReleases = n);
+  }
+
+  Future<void> _pollReleases() async {
+    try {
+      setNewReleases((await App.api.releases()).unread);
+    } catch (_) {}
+  }
 
   /// The shell on screen: pages pushed over it (a movie, an actress) are not below it.
   static _ShellState? _current;
@@ -272,6 +289,8 @@ class _ShellState extends State<Shell> {
     super.initState();
     _current = this;
     unawaited(_pollJobs());
+    unawaited(_pollReleases());
+    _releasesTimer = Timer.periodic(const Duration(minutes: 30), (_) => unawaited(_pollReleases()));
     // a newer build on JavHub? asked once a start, a little after it
     Future<void>.delayed(const Duration(seconds: 4), () {
       if (mounted) unawaited(checkForUpdate(context));
@@ -282,6 +301,7 @@ class _ShellState extends State<Shell> {
   void dispose() {
     if (_current == this) _current = null;
     _jobsTimer?.cancel();
+    _releasesTimer?.cancel();
     super.dispose();
   }
 
@@ -323,7 +343,7 @@ class _ShellState extends State<Shell> {
         body: IndexedStack(index: _tab, children: pages),
         bottomNavigationBar: _GlassNavBar(
           selected: _tab,
-          badge: _activeJobs > 0 ? '$_activeJobs' : null,
+          badges: {if (_activeJobs > 0) 3: '$_activeJobs', if (_newReleases > 0) 4: '$_newReleases'},
           onSelect: (i) {
             if (i == _tab) {
               // the open tab tapped again: back to the top
@@ -373,7 +393,7 @@ class _ShellState extends State<Shell> {
                     _SideButton(
                       item: _nav[i],
                       selected: _tab == i,
-                      badge: i == 3 && _activeJobs > 0 ? '$_activeJobs' : null,
+                      badge: i == 3 && _activeJobs > 0 ? '$_activeJobs' : (i == 4 && _newReleases > 0 ? '$_newReleases' : null),
                       onTap: () {
                         // back to 首页: show what was just watched
                         if (i == 0 && _tab != 0) unawaited(_homeKey.currentState?.reload());
@@ -399,11 +419,11 @@ class _ShellState extends State<Shell> {
 /// The phone's navigation: a rounded bar of frosted glass floating above the page,
 /// a lighter glass lens sliding to the chosen tab.
 class _GlassNavBar extends StatelessWidget {
-  const _GlassNavBar({required this.selected, required this.onSelect, this.badge});
+  const _GlassNavBar({required this.selected, required this.onSelect, this.badges = const {}});
 
   final int selected;
   final ValueChanged<int> onSelect;
-  final String? badge;
+  final Map<int, String> badges;
 
   static const _radius = 28.0;
 
@@ -482,7 +502,7 @@ class _GlassNavBar extends StatelessWidget {
                                 child: _GlassNavItem(
                                   item: _nav[i],
                                   selected: i == selected,
-                                  badge: i == 3 ? badge : null,
+                                  badge: badges[i],
                                   onTap: () => onSelect(i),
                                 ),
                               ),
