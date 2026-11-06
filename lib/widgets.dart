@@ -145,9 +145,9 @@ double? imageAspect(Uint8List b) {
   return null;
 }
 
-/// A DVD sleeve (back + spine + front) is ~1.49:1; a picture this wide or wider is one
-/// picture (uncensored studios, digital-only releases), with no front half to show.
-const widePicture = 1.6;
+/// One 16:9 picture (uncensored studios, FC2, digital-only releases), with no front half
+/// to show - unlike a sleeve (back + spine + front: a DVD's ~1.49:1, a Blu-ray's ~1.83:1).
+bool isOnePicture(double? aspect) => aspect != null && (aspect - 16 / 9).abs() <= 0.025;
 
 class NetImage extends StatefulWidget {
   const NetImage(this.url, {super.key, this.fit = BoxFit.cover, this.decodeWidth, this.alignment = Alignment.center, this.poster = false});
@@ -208,7 +208,7 @@ class _NetImageState extends State<NetImage> {
   Widget build(BuildContext context) {
     final b = _bytes;
     if (b == null) return _empty(context, broken: _failed);
-    if (widget.poster && (imageAspect(b) ?? 0) >= widePicture) {
+    if (widget.poster && isOnePicture(imageAspect(b))) {
       return Stack(fit: StackFit.expand, children: [
         ClipRect(
           child: ImageFiltered(

@@ -25,9 +25,12 @@ void main() {
       ..buffer.asByteData().setUint32(20, 540);
     expect(imageAspect(png), closeTo(16 / 9, 1e-9));
     expect(imageAspect(Uint8List.fromList([1, 2, 3])), isNull);
-    // a sleeve (back + spine + front) is not "wide"; a 16:9 picture is
-    expect(800 / 538 < widePicture, isTrue);
-    expect(800 / 450 >= widePicture, isTrue);
+    // a sleeve (back + spine + front, DVD or Blu-ray) is not one picture; a 16:9 one is
+    expect(isOnePicture(800 / 538), isFalse);
+    expect(isOnePicture(800 / 438), isFalse);
+    expect(isOnePicture(800 / 450), isTrue);
+    expect(isOnePicture(960 / 540), isTrue);
+    expect(isOnePicture(null), isFalse);
   });
 
   test('a player window gets everything it needs on its command line', () {
