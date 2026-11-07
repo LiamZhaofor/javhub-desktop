@@ -118,7 +118,7 @@ jobs:
     steps:
       - name: Build tools
         run: |
-          dnf install -y -q git curl unzip xz which tar clang cmake ninja-build pkgconf-pkg-config             gtk3-devel mpv-libs-devel rpm-build findutils
+          dnf install -y -q git curl unzip xz which tar clang cmake ninja-build pkgconf-pkg-config             gtk3-devel mpv-libs-devel rpm-build findutils patchelf binutils
       - uses: actions/checkout@v4
       - name: Flutter
         run: |

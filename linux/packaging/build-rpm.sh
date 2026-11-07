@@ -8,6 +8,11 @@ version=${line%%+*}
 build=${line##*+}
 bundle=$PWD/build/linux/x64/release/bundle
 test -x "$bundle/javhub"
+# the plugin libraries come out of the build with the build tree as their runpath: their own
+# folder instead (it holds libflutter_linux_gtk.so too)
+for so in "$bundle"/lib/*.so; do
+  if readelf -d "$so" | grep -qE 'R(UN)?PATH'; then patchelf --set-rpath '$ORIGIN' "$so"; fi
+done
 top=$(mktemp -d)
 rpmbuild -bb linux/packaging/javhub.spec \
   --define "_topdir $top" --define "app_version $version" --define "app_build $build" \
