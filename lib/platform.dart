@@ -5,6 +5,22 @@ import 'package:flutter/widgets.dart';
 /// Windows / macOS / Linux: mouse, keyboard, a window.
 final bool isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+/// The system's name as the pages say it.
+final String platformName = Platform.isWindows ? 'Windows' : Platform.isLinux ? 'Linux' : Platform.isAndroid ? 'Android' : Platform.operatingSystem;
+
+/// Where pictures go: Windows' 图片, the Linux desktop's XDG pictures folder (图片 or Pictures).
+Future<Directory> picturesDir() async {
+  if (Platform.isLinux) {
+    try {
+      final r = await Process.run('xdg-user-dir', ['PICTURES']);
+      final p = '${r.stdout}'.trim();
+      if (r.exitCode == 0 && p.isNotEmpty && p != Platform.environment['HOME']) return Directory(p);
+    } catch (_) {}
+    return Directory('${Platform.environment['HOME'] ?? '.'}/Pictures');
+  }
+  return Directory('${Platform.environment['USERPROFILE'] ?? '.'}${Platform.pathSeparator}Pictures');
+}
+
 /// A phone (or a narrow window): bottom navigation, stacked layouts.
 bool isCompact(BuildContext context) => MediaQuery.sizeOf(context).width < 720;
 

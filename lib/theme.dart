@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -84,8 +86,13 @@ ThemeData buildTheme(Brightness brightness) {
     // landed on a serif)
     // Android: the system's own sans-serif (OEMs replace Roboto - ColorOS has no Roboto,
     // and Flutter asking for it fell back to a serif)
-    fontFamily: isDesktop ? 'Microsoft YaHei UI' : 'sans-serif',
-    fontFamilyFallback: isDesktop ? const ['Microsoft YaHei', 'Segoe UI', 'PingFang SC'] : null,
+    // Linux: the desktop's own sans (fontconfig picks Noto Sans CJK SC for the Han on Fedora)
+    fontFamily: Platform.isWindows ? 'Microsoft YaHei UI' : Platform.isLinux ? null : 'sans-serif',
+    fontFamilyFallback: Platform.isWindows
+        ? const ['Microsoft YaHei', 'Segoe UI', 'PingFang SC']
+        : Platform.isLinux
+        ? const ['Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei']
+        : null,
     visualDensity: VisualDensity.standard,
     splashFactory: InkSparkle.splashFactory,
     dividerTheme: DividerThemeData(color: p.line, thickness: 1, space: 1),

@@ -34,7 +34,9 @@ class AppUpdate {
 }
 
 class Updater {
-  static String get platform => Platform.isAndroid ? 'android' : 'windows';
+  static String get platform => Platform.isAndroid ? 'android' : Platform.isLinux ? 'linux' : 'windows';
+
+  static String get _ext => Platform.isAndroid ? '.apk' : Platform.isLinux ? '.rpm' : '.exe';
 
   static Future<(String, int)> current() async {
     final p = await PackageInfo.fromPlatform();
@@ -60,7 +62,7 @@ class Updater {
         await f.delete();
       } catch (_) {}
     }
-    final file = File('${dir.path}${Platform.pathSeparator}JavHub-${u.version}+${u.build}${Platform.isAndroid ? '.apk' : '.exe'}');
+    final file = File('${dir.path}${Platform.pathSeparator}JavHub-${u.version}+${u.build}$_ext');
     final client = http.Client();
     try {
       final req = http.Request('GET', App.api.uri(u.url))..headers.addAll(App.api.authHeaders);
@@ -93,8 +95,26 @@ class Updater {
   }
 
   /// Windows: the installer runs on its own (no questions), closes this app and
-  /// starts the new one. Android: the system's install screen.
+  /// starts the new one. Android: the system's install screen. Linux (Fedora): dnf
+  /// installs the RPM after the desktop's password prompt (polkit), then the new
+  /// version starts; without pkexec, GNOME Software opens it.
   static Future<void> install(File f) async {
+    if (Platform.isLinux) {
+      ProcessResult r;
+      try {
+        r = await Process.run('pkexec', ['dnf', 'install', '-y', f.path]);
+      } on ProcessException {
+        await Process.start('xdg-open', [f.path], mode: ProcessStartMode.detached);
+        return;
+      }
+      if (r.exitCode != 0) {
+        // 126/127: the password prompt was dismissed
+        throw Exception(r.exitCode == 126 || r.exitCode == 127 ? '没有授权安装' : '安装失败：${'${r.stderr}'.trim().split('\n').last}');
+      }
+      await Process.start('/usr/bin/javhub', const [], mode: ProcessStartMode.detached);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      exit(0);
+    }
     if (Platform.isWindows) {
       await Process.start(f.path, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/CLOSEAPPLICATIONS'],
           mode: ProcessStartMode.detached);

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=JavHub
+GenericName=Media Library
+GenericName[zh_CN]=影片库
+Comment=JavHub library, search, downloads and player
+Comment[zh_CN]=JavHub 片库、搜索下载与播放
+Exec=/usr/bin/javhub
+Icon=codes.liamzhao.javhub
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupNotify=true
+StartupWMClass=codes.liamzhao.javhub

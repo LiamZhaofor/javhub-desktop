@@ -3,6 +3,7 @@ analyzer:
     - build/**
     - windows/**
     - android/**
+    - linux/**
   language:
     strict-casts: false
 linter:

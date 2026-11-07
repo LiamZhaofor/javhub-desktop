@@ -110,7 +110,7 @@ class PlayerWindows {
       _open.remove(key);
       onClosed?.call();
       // the library window was closed while this one played: now it can go
-      if (_mainClosing && _open.isEmpty) unawaited(windowManager.destroy());
+      if (_mainClosing && _open.isEmpty) _quit();
     }));
   }
 
@@ -129,9 +129,16 @@ class _MainWindowCloser with WindowListener {
       PlayerWindows._mainClosing = true;
       unawaited(windowManager.hide());
     } else {
-      unawaited(windowManager.destroy());
+      _quit();
     }
   }
+}
+
+/// The main window's last step. Linux: destroying Flutter's (only) view crashes the engine
+/// on the way out, so the process just ends.
+void _quit() {
+  if (Platform.isLinux) exit(0);
+  unawaited(windowManager.destroy());
 }
 
 /// `JavHub.exe --player <args>`: one movie in a window.

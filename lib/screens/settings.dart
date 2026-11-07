@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app.dart';
@@ -8,7 +10,7 @@ import '../widgets.dart' show NetImage, toast;
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.5.4';
+const appVersion = '0.5.5';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -45,7 +47,7 @@ class SettingsPage extends StatelessWidget {
                   ListTile(
                     leading: const Icon(Icons.palette_outlined),
                     title: const Text('主题'),
-                    subtitle: Text(isDesktop ? '亮色、暗色，或跟随 Windows 设置' : '亮色、暗色，或跟随系统'),
+                    subtitle: Text(Platform.isWindows ? '亮色、暗色，或跟随 Windows 设置' : '亮色、暗色，或跟随系统'),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -127,7 +129,7 @@ class SettingsPage extends StatelessWidget {
                     builder: (context, snap) => ListTile(
                       leading: const Icon(Icons.info_outline_rounded),
                       title: Text('JavHub ${snap.data?.$1 ?? appVersion}'),
-                      subtitle: Text('构建 ${snap.data?.$2 ?? '-'} · ${isDesktop ? 'Windows' : 'Android'} · 新版本由 JavHub 服务器分发',
+                      subtitle: Text('构建 ${snap.data?.$2 ?? '-'} · $platformName · 新版本由 JavHub 服务器分发',
                           style: TextStyle(color: p.muted)),
                       trailing: FilledButton.tonalIcon(
                         onPressed: () => checkForUpdate(context, quiet: false),

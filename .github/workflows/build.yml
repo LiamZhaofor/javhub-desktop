@@ -1,7 +1,7 @@
 name: Build and release
 
-# Every push to main: analyze + test, build the Windows installer and the Android APK,
-# then publish them: the rolling "latest" GitHub pre-release, and JavHub's update
+# Every push to main: analyze + test, build the Windows installer, the Android APK and the
+# Fedora RPM, then publish them: the rolling "latest" GitHub pre-release, and JavHub's update
 # channel (the apps offer an update when the build number in pubspec.yaml went up).
 on:
   push:
@@ -110,8 +110,42 @@ jobs:
           path: JavHub-Android-*.apk
           if-no-files-found: error
 
+  linux:
+    needs: check
+    runs-on: ubuntu-latest
+    # built on Fedora itself: the bundle links the system's GTK 3 and libmpv (mpv-libs)
+    container: fedora:42
+    steps:
+      - name: Build tools
+        run: |
+          dnf install -y -q git curl unzip xz which tar clang cmake ninja-build pkgconf-pkg-config             gtk3-devel mpv-libs-devel rpm-build findutils
+      - uses: actions/checkout@v4
+      - name: Flutter
+        run: |
+          curl -fsSL "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" | tar -xJ -C /opt
+          git config --global --add safe.directory /opt/flutter
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo /opt/flutter/bin >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          flutter config --no-analytics --enable-linux-desktop
+          flutter build linux --release
+      - name: Package
+        run: linux/packaging/build-rpm.sh
+      - name: Install test
+        # every dependency must resolve from Fedora's own repositories
+        run: |
+          dnf install -y -q ./JavHub-Linux-*.rpm
+          rpm -ql javhub | grep -E '^/usr/bin/javhub$|codes.liamzhao.javhub.desktop$'
+          ldd /usr/lib64/javhub/javhub /usr/lib64/javhub/lib/*.so | grep "not found" && exit 1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: JavHub-Linux-*.rpm
+          if-no-files-found: error
+
   publish:
-    needs: [check, windows, android]
+    needs: [check, windows, android, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -136,11 +170,12 @@ jobs:
           }
           up windows JavHub-Setup-*.exe
           up android JavHub-Android-*.apk
+          up linux JavHub-Linux-*.rpm
       - name: GitHub pre-release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag -R "${{ github.repository }}" 2>/dev/null || true
-          gh release create latest JavHub-Setup-*.exe JavHub-Windows-*.zip JavHub-Android-*.apk -R "${{ github.repository }}" \
+          gh release create latest JavHub-Setup-*.exe JavHub-Windows-*.zip JavHub-Android-*.apk JavHub-Linux-*.rpm -R "${{ github.repository }}" \
             --prerelease --target "${{ github.sha }}" --title "JavHub ${{ needs.check.outputs.version }} (${{ needs.check.outputs.build }})" \
             --notes-file notes.txt

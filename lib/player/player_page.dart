@@ -197,7 +197,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     await _tools.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
     await _tools.setProperty('sub-auto', 'no');
     if (isDesktop) {
-      await _tools.setProperty('sub-font', 'Microsoft YaHei');
+      await _tools.setProperty('sub-font', Platform.isLinux ? 'Noto Sans CJK SC' : 'Microsoft YaHei');
       await _tools.setProperty('hwdec', 'auto-safe');
     }
 
@@ -291,10 +291,12 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
 
   Future<void> _closeWindow() async {
     if (_resumeDone) await _savePosition().timeout(const Duration(seconds: 3), onTimeout: () {});
+    // Linux: destroying Flutter's (only) view crashes the engine on the way out - leave directly
+    if (Platform.isLinux) exit(0);
     await windowManager.destroy();
   }
 
-  static String get _device => Platform.isAndroid ? 'Android' : (Platform.isWindows ? 'Windows' : Platform.operatingSystem);
+  static String get _device => platformName;
 
   /// Where to resume next time (also saved during playback: closing the window
   /// skips dispose()).
@@ -387,12 +389,13 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     try {
       final bytes = await _player.screenshot(format: 'image/jpeg');
       if (bytes == null) throw Exception('没有画面');
-      final dir = Directory('${Platform.environment['USERPROFILE'] ?? '.'}${Platform.pathSeparator}Pictures${Platform.pathSeparator}JavHub');
+      final pictures = await picturesDir();
+      final dir = Directory('${pictures.path}${Platform.pathSeparator}JavHub');
       await dir.create(recursive: true);
       final t = _player.state.position;
       final name = '${widget.code.isEmpty ? 'JavHub' : widget.code}_${fmtClock(t).replaceAll(':', '-')}.jpg';
       await File('${dir.path}${Platform.pathSeparator}$name').writeAsBytes(bytes);
-      _tools.toast('截图已保存到 图片\\JavHub\\$name');
+      _tools.toast('截图已保存到 ${dir.path}${Platform.pathSeparator}$name');
     } catch (e) {
       _tools.toast('截图失败: $e');
     }
@@ -820,7 +823,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
           if (isDesktop) _MenuRow(
             icon: Icons.photo_camera_outlined,
             title: '截图',
-            subtitle: '保存到 图片\\JavHub',
+            subtitle: Platform.isLinux ? '保存到 图片/JavHub' : '保存到 图片\\JavHub',
             onTap: () {
               _panel.value = null;
               unawaited(_screenshot());
