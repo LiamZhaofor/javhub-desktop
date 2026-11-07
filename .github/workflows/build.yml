@@ -131,7 +131,7 @@ jobs:
           flutter config --no-analytics --enable-linux-desktop
           flutter build linux --release
       - name: Package
-        run: linux/packaging/build-rpm.sh
+        run: bash linux/packaging/build-rpm.sh
       - name: Install test
         # every dependency must resolve from Fedora's own repositories
         run: |
