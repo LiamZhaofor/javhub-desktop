@@ -11,7 +11,7 @@ import '../widgets.dart' show NetImage, toast;
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.5.6';
+const appVersion = '0.5.7';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});

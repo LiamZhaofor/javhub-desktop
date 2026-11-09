@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
+import '../motion.dart';
 import 'tools.dart';
 
 /// The phone's player controls (instead of media_kit's, which show their bars the moment a
@@ -54,6 +55,8 @@ class _TouchControlsState extends State<TouchControls> {
   // a double tap's jump, shown on its side for a moment
   int _jump = 0; // seconds, sign = direction
   Timer? _jumpTimer;
+  Offset _tapAt = Offset.zero;
+  int _tapSerial = 0;
 
   // sideways swipe
   double? _swipeStartX;
@@ -137,7 +140,11 @@ class _TouchControlsState extends State<TouchControls> {
     final step = widget.tools.settings.seekStep;
     final forward = x >= width * 2 / 3;
     // a second double tap on the same side while the first still shows adds up
-    setState(() => _jump = (_jump != 0 && (_jump > 0) == forward ? _jump : 0) + (forward ? step : -step).round());
+    setState(() {
+      _jump = (_jump != 0 && (_jump > 0) == forward ? _jump : 0) + (forward ? step : -step).round();
+      _tapAt = d.localPosition;
+      _tapSerial++;
+    });
     widget.tools.queueSeek(forward ? step : -step);
     _jumpTimer?.cancel();
     _jumpTimer = Timer(const Duration(milliseconds: 900), () {
@@ -248,7 +255,7 @@ class _TouchControlsState extends State<TouchControls> {
         onVerticalDragUpdate: (d) => _levelUpdate(d, h),
         onVerticalDragEnd: (_) => _swipeLeft = null,
       ),
-      // a double tap's jump, on its side
+      // a double tap's jump, on its side: a ripple spreading from the finger, the count popping
       for (final right in [false, true])
         Positioned(
           left: right ? null : 0,
@@ -259,35 +266,56 @@ class _TouchControlsState extends State<TouchControls> {
           child: IgnorePointer(
             child: AnimatedOpacity(
               opacity: _jump != 0 && (_jump > 0) == right ? 1 : 0,
-              duration: const Duration(milliseconds: 160),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: right ? const Alignment(0.6, 0) : const Alignment(-0.6, 0),
-                    radius: 0.9,
-                    colors: const [Color(0x40FFFFFF), Color(0x00FFFFFF)],
+              duration: _jump != 0 ? Motion.fast : Motion.medium,
+              curve: _jump != 0 ? Motion.enter : Motion.exit,
+              child: ClipPath(
+                // the half-moon the side's shade is cut to (as the big video apps do)
+                clipper: _SideClip(right: right),
+                child: Stack(fit: StackFit.expand, children: [
+                  const ColoredBox(color: Color(0x1FFFFFFF)),
+                  if (_jump != 0 && (_jump > 0) == right)
+                    _Ripple(key: ValueKey(_tapSerial), center: Offset(_tapAt.dx - (right ? w * 2 / 3 : 0), _tapAt.dy)),
+                  Center(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey('n$_tapSerial'),
+                      tween: Tween(begin: 0.7, end: 1),
+                      duration: Motion.settle,
+                      curve: Motion.spring,
+                      builder: (_, s, child) => Transform.scale(scale: s, child: child),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(right ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded, color: Colors.white, size: 34),
+                        const SizedBox(height: 4),
+                        Text('${_jump.abs()} 秒', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
                   ),
-                ),
-                alignment: Alignment.center,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(right ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded, color: Colors.white, size: 34),
-                  const SizedBox(height: 4),
-                  Text('${_jump.abs()} 秒', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                 ]),
               ),
             ),
           ),
         ),
-      // a sideways swipe: where it lands
-      if (_swipeTo != null)
-        IgnorePointer(
-          child: Center(
-            child: _Bubble(
-              '${_clock(_swipeTo!)}  ${_swipeTo! >= _swipeFrom ? '+' : '−'}${_clock((_swipeTo! - _swipeFrom).abs())}',
+      // a sideways swipe: where it lands; a vertical one: the level
+      IgnorePointer(
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: Motion.medium,
+            switchInCurve: Motion.enter,
+            switchOutCurve: Motion.exit,
+            transitionBuilder: (child, a) => FadeTransition(
+              opacity: a,
+              child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: child),
             ),
+            child: _swipeTo != null
+                ? _Bubble(
+                    '${_clock(_swipeTo!)}  ${_swipeTo! >= _swipeFrom ? '+' : '−'}${_clock((_swipeTo! - _swipeFrom).abs())}',
+                    key: const ValueKey('swipe'),
+                  )
+                : _levelLabel != null
+                ? _Level(key: ValueKey('level$_swipeLeft'), brightness: _swipeLeft ?? _levelLabel!.startsWith('亮'), value: _level)
+                : const SizedBox.shrink(key: ValueKey('none')),
           ),
         ),
-      if (_levelLabel != null) IgnorePointer(child: Center(child: _Bubble(_levelLabel!))),
+      ),
       if (_buffering && _swipeTo == null)
         const IgnorePointer(
           child: Center(child: SizedBox(width: 42, height: 42, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))),
@@ -300,12 +328,13 @@ class _TouchControlsState extends State<TouchControls> {
         child: IgnorePointer(
           ignoring: !_visible,
           child: AnimatedSlide(
-            offset: _visible ? Offset.zero : const Offset(0, -0.4),
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
+            offset: _visible ? Offset.zero : const Offset(0, -0.5),
+            duration: _visible ? Motion.slow : Motion.medium,
+            curve: _visible ? Motion.enter : Motion.exit,
             child: AnimatedOpacity(
               opacity: _visible ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
+              duration: _visible ? Motion.medium : Motion.fast,
+              curve: _visible ? Motion.enter : Motion.exit,
               child: Listener(onPointerDown: (_) => _show(), child: _bar(widget.topBar, top: true)),
             ),
           ),
@@ -318,12 +347,13 @@ class _TouchControlsState extends State<TouchControls> {
         child: IgnorePointer(
           ignoring: !_visible,
           child: AnimatedSlide(
-            offset: _visible ? Offset.zero : const Offset(0, 0.4),
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
+            offset: _visible ? Offset.zero : const Offset(0, 0.5),
+            duration: _visible ? Motion.slow : Motion.medium,
+            curve: _visible ? Motion.enter : Motion.exit,
             child: AnimatedOpacity(
               opacity: _visible ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
+              duration: _visible ? Motion.medium : Motion.fast,
+              curve: _visible ? Motion.enter : Motion.exit,
               child: Listener(onPointerDown: (_) => _show(), child: _bar(widget.bottomBar, top: false)),
             ),
           ),
@@ -335,12 +365,12 @@ class _TouchControlsState extends State<TouchControls> {
           child: IgnorePointer(
             ignoring: !_visible,
             child: AnimatedScale(
-              scale: _visible ? 1 : 0.8,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutBack,
+              scale: _visible ? 1 : 0.7,
+              duration: _visible ? Motion.settle : Motion.fast,
+              curve: _visible ? Motion.spring : Motion.exit,
               child: AnimatedOpacity(
                 opacity: _visible ? 1 : 0,
-                duration: const Duration(milliseconds: 180),
+                duration: _visible ? Motion.medium : Motion.fast,
                 child: Material(
                   color: const Color(0x66000000),
                   shape: const CircleBorder(),
@@ -353,8 +383,13 @@ class _TouchControlsState extends State<TouchControls> {
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 160),
-                        transitionBuilder: (child, a) => ScaleTransition(scale: a, child: child),
+                        duration: Motion.medium,
+                        switchInCurve: Motion.spring,
+                        switchOutCurve: Motion.exit,
+                        transitionBuilder: (child, a) => FadeTransition(
+                          opacity: a,
+                          child: RotationTransition(turns: Tween(begin: -0.08, end: 0.0).animate(a), child: ScaleTransition(scale: a, child: child)),
+                        ),
                         child: Icon(
                           _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                           key: ValueKey(_playing),
@@ -373,8 +408,112 @@ class _TouchControlsState extends State<TouchControls> {
   });
 }
 
+/// The side's shade: a half-moon bulging toward the middle of the picture.
+class _SideClip extends CustomClipper<Path> {
+  const _SideClip({required this.right});
+
+  final bool right;
+
+  @override
+  Path getClip(Size s) {
+    final p = Path();
+    if (right) {
+      p.moveTo(s.width, 0);
+      p.lineTo(s.width * 0.28, 0);
+      p.quadraticBezierTo(-s.width * 0.18, s.height / 2, s.width * 0.28, s.height);
+      p.lineTo(s.width, s.height);
+    } else {
+      p.moveTo(0, 0);
+      p.lineTo(s.width * 0.72, 0);
+      p.quadraticBezierTo(s.width * 1.18, s.height / 2, s.width * 0.72, s.height);
+      p.lineTo(0, s.height);
+    }
+    return p..close();
+  }
+
+  @override
+  bool shouldReclip(_SideClip old) => old.right != right;
+}
+
+/// A ring of light spreading from where the finger tapped, fading as it goes.
+class _Ripple extends StatefulWidget {
+  const _Ripple({super.key, required this.center});
+
+  final Offset center;
+
+  @override
+  State<_Ripple> createState() => _RippleState();
+}
+
+class _RippleState extends State<_Ripple> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 650))..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (_, _) => CustomPaint(painter: _RipplePainter(widget.center, Motion.enter.transform(_c.value))),
+  );
+}
+
+class _RipplePainter extends CustomPainter {
+  _RipplePainter(this.center, this.t);
+
+  final Offset center;
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.longestSide * 0.75 * t;
+    canvas.drawCircle(center, r, Paint()..color = Colors.white.withValues(alpha: 0.22 * (1 - t)));
+  }
+
+  @override
+  bool shouldRepaint(_RipplePainter old) => old.t != t || old.center != center;
+}
+
+/// Brightness / volume while swiping up and down: an icon and a bar that fills.
+class _Level extends StatelessWidget {
+  const _Level({super.key, required this.brightness, required this.value});
+
+  final bool brightness;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 220,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    decoration: BoxDecoration(color: const Color(0xC0000000), borderRadius: BorderRadius.circular(22)),
+    child: Row(children: [
+      Icon(
+        brightness
+            ? (value < 0.34 ? Icons.brightness_low_rounded : value < 0.67 ? Icons.brightness_medium_rounded : Icons.brightness_high_rounded)
+            : (value == 0 ? Icons.volume_off_rounded : value < 0.5 ? Icons.volume_down_rounded : Icons.volume_up_rounded),
+        color: Colors.white,
+        size: 22,
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(end: value),
+            duration: Motion.fast,
+            builder: (_, v, _) => LinearProgressIndicator(value: v, minHeight: 5, color: Colors.white, backgroundColor: Colors.white24),
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
 class _Bubble extends StatelessWidget {
-  const _Bubble(this.text);
+  const _Bubble(this.text, {super.key});
 
   final String text;
 

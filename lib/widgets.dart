@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app.dart';
 import 'models.dart';
+import 'motion.dart';
 import 'theme.dart';
 
 export 'theme.dart' show accent, Palette, PageHeader;
@@ -272,7 +273,11 @@ class PosterTile extends StatefulWidget {
     this.corner = const [],
     this.cover = false,
     this.onTap,
+    this.heroTag,
   });
+
+  /// Flies into the movie's page (the same tag there).
+  final Object? heroTag;
 
   final String image;
   final String code;
@@ -307,9 +312,10 @@ class _PosterTileState extends State<PosterTile> {
         onTapUp: (_) => setState(() => _pressed = false),
         onTapCancel: () => setState(() => _pressed = false),
         child: AnimatedScale(
-          scale: _pressed ? 0.965 : 1,
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
+          // pressed: in quickly; let go: back with a little spring
+          scale: _pressed ? 0.955 : 1,
+          duration: _pressed ? Motion.fast : Motion.settle,
+          curve: _pressed ? Motion.standard : Motion.spring,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -340,7 +346,13 @@ class _PosterTileState extends State<PosterTile> {
                           scale: _hover ? 1.06 : 1,
                           duration: const Duration(milliseconds: 420),
                           curve: Curves.easeOutCubic,
-                          child: NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center, poster: true),
+                          child: widget.heroTag == null
+                              ? NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center, poster: true)
+                              : Hero(
+                                  tag: widget.heroTag!,
+                                  flightShuttleBuilder: crossFadeShuttle,
+                                  child: NetImage(widget.image, decodeWidth: 360, poster: true),
+                                ),
                         ),
                         // a soft sheen at the bottom, so the badges and marks read on any poster
                         IgnorePointer(
@@ -545,14 +557,14 @@ class Appear extends StatefulWidget {
 }
 
 class _AppearState extends State<Appear> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
-  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  late final AnimationController _c = AnimationController(vsync: this, duration: Motion.settle);
+  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Motion.standard);
   Timer? _delay;
 
   @override
   void initState() {
     super.initState();
-    final wait = widget.index < 18 ? widget.index * 28 : 0;
+    final wait = widget.index < 18 ? widget.index * 24 : 0;
     if (wait == 0) {
       _c.forward();
     } else {
@@ -574,7 +586,10 @@ class _AppearState extends State<Appear> with SingleTickerProviderStateMixin {
     animation: _a,
     builder: (_, child) => Opacity(
       opacity: _a.value,
-      child: Transform.translate(offset: Offset(0, widget.offset * (1 - _a.value)), child: child),
+      child: Transform.translate(
+        offset: Offset(0, widget.offset * (1 - _a.value)),
+        child: Transform.scale(scale: 0.96 + 0.04 * _a.value, child: child),
+      ),
     ),
     child: widget.child,
   );

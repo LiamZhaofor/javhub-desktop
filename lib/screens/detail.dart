@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app.dart';
 import '../models.dart';
+import '../motion.dart';
 import '../platform.dart';
 import '../player/player_page.dart';
 import '../player/player_window.dart';
@@ -15,9 +16,10 @@ import '../widgets.dart';
 import 'actor.dart';
 
 /// Opens a movie's page; its actress / tag links filter the library, 查找其它版本 searches.
-Future<void> openDetail(BuildContext context, LibraryItem it) => Navigator.of(context).push(MaterialPageRoute(
+Future<void> openDetail(BuildContext context, LibraryItem it, {Object? heroTag}) => Navigator.of(context).push(MaterialPageRoute(
   builder: (route) => DetailPage(
     item: it,
+    heroTag: heroTag,
     onFilter: (q) {
       Navigator.of(route).pop();
       Shell.filterLibrary(context, q);
@@ -30,9 +32,12 @@ Future<void> openDetail(BuildContext context, LibraryItem it) => Navigator.of(co
 ));
 
 class DetailPage extends StatefulWidget {
-  const DetailPage({super.key, required this.item, this.onFilter, this.onSearch});
+  const DetailPage({super.key, required this.item, this.onFilter, this.onSearch, this.heroTag});
 
   final LibraryItem item;
+
+  /// The tile it was opened from: its poster flies into this page's cover.
+  final Object? heroTag;
 
   /// Back to the library, filtered by an actress / studio / tag.
   final void Function(String query)? onFilter;
@@ -400,7 +405,12 @@ class _DetailPageState extends State<DetailPage> {
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(14),
-                            child: AspectRatio(aspectRatio: it.fanart ? 1.5 : 0.7, child: NetImage(cover)),
+                            child: AspectRatio(
+                              aspectRatio: it.fanart ? 1.5 : 0.7,
+                              child: widget.heroTag == null
+                                  ? NetImage(cover)
+                                  : Hero(tag: widget.heroTag!, flightShuttleBuilder: crossFadeShuttle, child: NetImage(cover)),
+                            ),
                           ),
                         );
                         final info = Column(

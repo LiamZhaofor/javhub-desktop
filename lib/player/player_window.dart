@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app.dart';
 import '../theme.dart';
+import '../window_frame.dart';
 import 'player_page.dart';
 
 /// What a player window is started with (on its command line, as base64 JSON).
@@ -152,6 +153,9 @@ Future<void> runPlayerWindow(String encoded) async {
       minimumSize: const Size(640, 400),
       center: b == null,
       backgroundColor: Colors.black,
+      // Windows: the player's own top bar carries the caption buttons
+      titleBarStyle: customTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !customTitleBar,
     ),
     () async {
       if (b != null) await windowManager.setPosition(b.topLeft);

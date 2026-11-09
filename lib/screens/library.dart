@@ -128,7 +128,7 @@ class LibraryPageState extends State<LibraryPage> {
   }
 
   // marks set on the movie's page change the item in place: show them on the way back
-  void _open(LibraryItem it) => openDetail(context, it).then((_) {
+  void _open(LibraryItem it) => openDetail(context, it, heroTag: 'lib-${it.id}').then((_) {
     if (mounted) setState(() {});
   });
 
@@ -245,6 +245,7 @@ class LibraryPageState extends State<LibraryPage> {
     Widget tile(BuildContext context, int i) {
       final it = view[i];
       return Appear(key: ValueKey('t-${it.id}'), index: i, child: PosterTile(
+        heroTag: 'lib-${it.id}',
         image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
         code: it.folder,
         subtitle: it.shortTitle,

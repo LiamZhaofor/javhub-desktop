@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'motion.dart';
 import 'platform.dart';
 
 const accent = Color(0xFFE5484D);
@@ -57,13 +59,13 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
   const SmoothPageTransitions();
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 320);
+  Duration get transitionDuration => const Duration(milliseconds: 380);
 
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
       Animation<double> secondaryAnimation, Widget child) {
-    final inA = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-    final outA = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final inA = CurvedAnimation(parent: animation, curve: Motion.standard, reverseCurve: Motion.exit);
+    final outA = CurvedAnimation(parent: secondaryAnimation, curve: Motion.standard, reverseCurve: Motion.exit);
     return FadeTransition(
       opacity: Tween(begin: 1.0, end: 0.55).animate(outA),
       child: ScaleTransition(
@@ -109,11 +111,13 @@ ThemeData buildTheme(Brightness brightness) {
   return ThemeData(
     useMaterial3: true,
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: SmoothPageTransitions(),
+      // the phone: the new page slides over from the right, the one under it drifts left and
+      // dims; a swipe from the left edge takes it back, following the finger
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
       TargetPlatform.windows: SmoothPageTransitions(),
       TargetPlatform.linux: SmoothPageTransitions(),
       TargetPlatform.macOS: SmoothPageTransitions(),
-      TargetPlatform.iOS: SmoothPageTransitions(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
     brightness: brightness,
     colorScheme: scheme,
@@ -300,7 +304,8 @@ class PageHeader extends StatelessWidget {
       );
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 14),
+      // (+ the custom title bar's band on Windows)
+      padding: EdgeInsets.fromLTRB(28, 24 + MediaQuery.paddingOf(context).top, 28, 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

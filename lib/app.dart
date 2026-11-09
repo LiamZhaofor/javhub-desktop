@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'api.dart';
+import 'motion.dart';
 import 'platform.dart';
 import 'screens/home.dart';
 import 'screens/jobs.dart';
@@ -15,6 +16,7 @@ import 'screens/settings.dart';
 import 'screens/favorites.dart';
 import 'theme.dart';
 import 'updater.dart';
+import 'window_frame.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -57,6 +59,8 @@ class _AppState extends State<App> {
     builder: (context, mode, _) => MaterialApp(
       title: 'JavHub',
       debugShowCheckedModeBanner: false,
+      builder: (context, child) => TitleBarFrame(child: child ?? const SizedBox.shrink()),
+      scrollBehavior: const _AppScroll(),
       // Chinese UI text, and on Android the Simplified Chinese system font (as an
       // English app the Han fallback landed on a serif)
       locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans', countryCode: 'CN'),
@@ -474,8 +478,8 @@ class _GlassNavBar extends StatelessWidget {
                     return Stack(
                       children: [
                         AnimatedPositioned(
-                          duration: const Duration(milliseconds: 380),
-                          curve: Curves.easeOutBack,
+                          duration: Motion.settle,
+                          curve: Motion.spring,
                           left: w * selected,
                           top: 0,
                           bottom: 0,
@@ -544,9 +548,9 @@ class _GlassNavItem extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             AnimatedScale(
-              scale: selected ? 1.12 : 1,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
+              scale: selected ? 1.14 : 1,
+              duration: Motion.settle,
+              curve: Motion.spring,
               child: Badge(
                 isLabelVisible: badge != null,
                 label: Text(badge ?? ''),
@@ -698,8 +702,10 @@ class FadeIndexedStack extends StatefulWidget {
 }
 
 class _FadeIndexedStackState extends State<FadeIndexedStack> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 260), value: 1);
-  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  // (the standard curve over 360 ms: the emphasized one is three-quarters done in 80 ms,
+  // which reads as a jump on a whole page)
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 360), value: 1);
+  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Motion.standard);
 
   @override
   void didUpdateWidget(FadeIndexedStack old) {
@@ -717,9 +723,19 @@ class _FadeIndexedStackState extends State<FadeIndexedStack> with SingleTickerPr
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _a,
     builder: (_, child) => Opacity(
-      opacity: 0.25 + 0.75 * _a.value,
-      child: Transform.translate(offset: Offset(0, 10 * (1 - _a.value)), child: child),
+      opacity: _a.value,
+      child: Transform.scale(scale: 0.96 + 0.04 * _a.value, child: child),
     ),
     child: IndexedStack(index: widget.index, children: widget.children),
   );
+}
+
+/// The phone's lists bounce at their ends (as ColorOS / iOS lists do) instead of stretching.
+class _AppScroll extends MaterialScrollBehavior {
+  const _AppScroll();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) => isDesktop
+      ? super.getScrollPhysics(context)
+      : const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
 }

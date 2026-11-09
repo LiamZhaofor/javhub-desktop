@@ -16,6 +16,8 @@ import '../theme.dart';
 import '../widgets.dart' show ImageStore;
 import 'stream_proxy.dart';
 import 'touch_controls.dart';
+import '../motion.dart';
+import '../window_frame.dart';
 import 'tools.dart';
 
 class PlaySource {
@@ -298,6 +300,9 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
   }
 
   // ---------------- its own window ----------------
+
+  Widget _maybeDrag(Widget child) =>
+      widget.windowed && customTitleBar ? WindowDragArea(child: SizedBox.expand(child: child)) : child;
 
   @override
   void onWindowClose() => unawaited(_closeWindow());
@@ -624,10 +629,19 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
                     final text = _tools.accelerating
                         ? '▶▶  ${_tools.settings.accelerationRate.toStringAsFixed(_tools.settings.accelerationRate % 1 == 0 ? 0 : 1)}× 加速中'
                         : _tools.message.value;
-                    return AnimatedOpacity(
-                      opacity: text == null ? 0 : 1,
-                      duration: const Duration(milliseconds: 180),
-                      child: text == null ? const SizedBox.shrink() : _Pill(text),
+                    return AnimatedSlide(
+                      offset: text == null ? const Offset(0, -0.6) : Offset.zero,
+                      duration: text == null ? Motion.medium : Motion.settle,
+                      curve: text == null ? Motion.exit : Motion.spring,
+                      child: AnimatedOpacity(
+                        opacity: text == null ? 0 : 1,
+                        duration: text == null ? Motion.fast : Motion.medium,
+                        child: AnimatedSwitcher(
+                          duration: Motion.fast,
+                          layoutBuilder: (current, previous) => Stack(alignment: Alignment.center, children: [...previous, ?current]),
+                          child: text == null ? const SizedBox.shrink() : _Pill(text, key: ValueKey(text)),
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -902,8 +916,12 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       Builder(builder: (context) => MaterialDesktopCustomButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => _back(context))),
       const SizedBox(width: 8),
       Expanded(
-        child: Text(widget.title, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+        // a window of its own on Windows: the top bar is its title bar (drag it, double click)
+        child: _maybeDrag(Align(
+          alignment: Alignment.centerLeft,
+          child: Text(widget.title, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+        )),
       ),
       if (widget.source.cloud)
         Container(
@@ -912,6 +930,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
           decoration: BoxDecoration(color: const Color(0xFF2563EB), borderRadius: BorderRadius.circular(5)),
           child: const Text('115', style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700)),
         ),
+      if (widget.windowed && customTitleBar) const CaptionButtons(light: true),
     ],
     bottomButtonBar: [
       const MaterialDesktopPlayOrPauseButton(),
@@ -1073,7 +1092,7 @@ extension on String {
 // ---------------- player widgets (always dark: they sit on the video) ----------------
 
 class _Pill extends StatelessWidget {
-  const _Pill(this.text);
+  const _Pill(this.text, {super.key});
 
   final String text;
 

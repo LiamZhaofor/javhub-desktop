@@ -178,7 +178,8 @@ class FavoritesPageState extends State<FavoritesPage> {
             subtitle: it.shortTitle,
             badges: [if (it.chineseSub) const Badge2('中字'), if (it.cloud) const Badge2('115', color: badgeBlue)],
             corner: markBadges(it),
-            onTap: () => openDetail(context, it).then((_) => reload()),
+            heroTag: 'fav-${it.id}',
+            onTap: () => openDetail(context, it, heroTag: 'fav-${it.id}').then((_) => reload()),
           ),
         );
       },

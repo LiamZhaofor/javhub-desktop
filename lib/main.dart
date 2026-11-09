@@ -8,6 +8,7 @@ import 'app.dart';
 import 'player/player_page.dart';
 import 'player/stream_proxy.dart';
 import 'theme.dart';
+import 'window_frame.dart';
 import 'player/player_window.dart';
 
 // --dart-define=JAVHUB_PHONE=true: a phone-sized window, to try the phone layout on a PC
@@ -65,12 +66,15 @@ Future<void> main(List<String> args) async {
   }
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
+    WindowOptions(
       title: 'JavHub',
-      size: _phone ? Size(412, 900) : Size(1440, 900),
-      minimumSize: _phone ? Size(360, 640) : Size(960, 640),
+      size: _phone ? const Size(412, 900) : const Size(1440, 900),
+      minimumSize: _phone ? const Size(360, 640) : const Size(960, 640),
       center: true,
-      backgroundColor: Color(0xFF0E1014),
+      backgroundColor: const Color(0xFF0E1014),
+      // Windows: the app draws its own title bar (window_frame.dart)
+      titleBarStyle: customTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !customTitleBar,
     ),
     () async {
       await windowManager.show();
