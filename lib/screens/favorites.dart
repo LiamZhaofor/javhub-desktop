@@ -155,7 +155,7 @@ class FavoritesPageState extends State<FavoritesPage> {
   Widget _movies(List<LibraryItem> favs) {
     if (favs.isEmpty) {
       return _loading && _all.isEmpty
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonGrid()
           : const EmptyHint('还没有收藏的影片：在影片页点 ♡ 收藏', icon: Icons.favorite_border_rounded);
     }
     return GridView.builder(
@@ -169,13 +169,17 @@ class FavoritesPageState extends State<FavoritesPage> {
       itemCount: favs.length,
       itemBuilder: (context, i) {
         final it = favs[i];
-        return PosterTile(
-          image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
-          code: it.folder,
-          subtitle: it.shortTitle,
-          badges: [if (it.chineseSub) const Badge2('中字'), if (it.cloud) const Badge2('115', color: badgeBlue)],
-          corner: markBadges(it),
-          onTap: () => openDetail(context, it).then((_) => reload()),
+        return Appear(
+          key: ValueKey('f-${it.id}'),
+          index: i,
+          child: PosterTile(
+            image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
+            code: it.folder,
+            subtitle: it.shortTitle,
+            badges: [if (it.chineseSub) const Badge2('中字'), if (it.cloud) const Badge2('115', color: badgeBlue)],
+            corner: markBadges(it),
+            onTap: () => openDetail(context, it).then((_) => reload()),
+          ),
         );
       },
     );

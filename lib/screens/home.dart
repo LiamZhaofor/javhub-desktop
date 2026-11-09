@@ -75,7 +75,7 @@ class HomePageState extends State<HomePage> {
     final p = Palette.of(context);
     final home = _home;
     if (home == null) {
-      return _error != null ? ErrorBox(_error!, onRetry: reload) : const Center(child: CircularProgressIndicator());
+      return _error != null ? ErrorBox(_error!, onRetry: reload) : const SkeletonGrid(count: 12);
     }
     final backdrop = _backdrop(home);
     final dark = Theme.of(context).brightness == Brightness.dark;

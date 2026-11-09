@@ -206,15 +206,19 @@ class SearchResult {
 }
 
 class Backend {
-  Backend(this.name, this.ok);
+  Backend(this.name, this.ok, {this.dirs = const [], this.dir = ''});
 
   final String name;
   final bool ok;
 
+  /// A 115 (cloud) destination: the library folders one can pick, and the usual one.
+  final List<String> dirs;
+  final String dir;
+
   /// Where a download ends up, in plain words (as the web UI says it).
   String get title {
     final tool = name.contains(':') ? name.split(':')[1].replaceFirst(RegExp(r' Cloud$'), '') : '';
-    if (name == 'qbittorrent') return 'NAS 本地';
+    if (name == 'qbittorrent') return 'NAS（BT 下载）';
     if (name.startsWith('cloud:')) return '$tool 网盘';
     return '$tool 离线 → NAS';
   }
@@ -230,7 +234,11 @@ class Backends {
   Backends(this.items, this.preferred);
 
   factory Backends.fromJson(Map<String, dynamic> j) => Backends(
-    [for (final b in (j['backends'] as List? ?? [])) if (b is Map) Backend(_s(b['name']), _b(b['ok']))],
+    [
+      for (final b in (j['backends'] as List? ?? []))
+        if (b is Map)
+          Backend(_s(b['name']), _b(b['ok']), dirs: [for (final d in (b['dirs'] as List? ?? const [])) '$d'], dir: _s(b['dir'])),
+    ],
     _s(j['default']),
   );
 

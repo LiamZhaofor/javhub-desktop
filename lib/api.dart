@@ -268,11 +268,12 @@ class JavHubApi {
 
   Future<Backends> backends() async => Backends.fromJson(await get('/api/backends'));
 
-  Future<Job> createJob(String code, {String? magnet, required String backend, bool replace = false, String subtitle = ''}) async {
+  Future<Job> createJob(String code, {String? magnet, required String backend, bool replace = false, String subtitle = '', String folder = ''}) async {
     final d = await post('/api/jobs', {
       'code': code,
       if (magnet != null) 'magnet': magnet,
       'backend': backend,
+      if (folder.isNotEmpty) 'folder': folder,
       'replace': replace,
       if (subtitle.isNotEmpty) 'subtitle': subtitle,
     });

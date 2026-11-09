@@ -589,6 +589,8 @@ final _traceStart = DateTime.now();
 void trace(String what) {
   if (!_tracing) return;
   final ms = DateTime.now().difference(_traceStart).inMilliseconds;
+  // ignore: avoid_print
+  print('javhub-trace $ms $what'); // (Android: logcat)
   try {
     File('${Directory.systemTemp.path}${Platform.pathSeparator}javhub_trace.log').writeAsStringSync('$ms $what\n', mode: FileMode.append);
   } catch (_) {}

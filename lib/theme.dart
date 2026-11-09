@@ -50,6 +50,36 @@ class Palette {
   static Palette of(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? dark : light;
 }
 
+/// A page comes in by fading and rising a little out of a slightly smaller size; the page
+/// under it settles back. (Material's default slides the whole page on Android and does
+/// nothing much on the desktop.)
+class SmoothPageTransitions extends PageTransitionsBuilder {
+  const SmoothPageTransitions();
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 320);
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    final inA = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final outA = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return FadeTransition(
+      opacity: Tween(begin: 1.0, end: 0.55).animate(outA),
+      child: ScaleTransition(
+        scale: Tween(begin: 1.0, end: 0.965).animate(outA),
+        child: FadeTransition(
+          opacity: inA,
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.035), end: Offset.zero).animate(inA),
+            child: ScaleTransition(scale: Tween(begin: 0.985, end: 1.0).animate(inA), child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 ThemeData buildTheme(Brightness brightness) {
   final p = brightness == Brightness.dark ? Palette.dark : Palette.light;
   final scheme = ColorScheme(
@@ -78,6 +108,13 @@ ThemeData buildTheme(Brightness brightness) {
   final radius = BorderRadius.circular(10);
   return ThemeData(
     useMaterial3: true,
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: SmoothPageTransitions(),
+      TargetPlatform.windows: SmoothPageTransitions(),
+      TargetPlatform.linux: SmoothPageTransitions(),
+      TargetPlatform.macOS: SmoothPageTransitions(),
+      TargetPlatform.iOS: SmoothPageTransitions(),
+    }),
     brightness: brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: p.bg,

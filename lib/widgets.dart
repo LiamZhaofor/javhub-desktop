@@ -292,6 +292,7 @@ class PosterTile extends StatefulWidget {
 
 class _PosterTileState extends State<PosterTile> {
   bool _hover = false;
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -302,54 +303,84 @@ class _PosterTileState extends State<PosterTile> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                transform: Matrix4.translationValues(0, _hover ? -4 : 0, 0),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _hover ? accent.withValues(alpha: 0.8) : p.line, width: _hover ? 1.5 : 1),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: _hover ? 0.35 : 0.12),
-                      blurRadius: _hover ? 18 : 6,
-                      offset: Offset(0, _hover ? 8 : 2),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center, poster: true),
-                      Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
-                      if (widget.corner.isNotEmpty)
-                        Positioned(right: 7, bottom: 7, child: Row(mainAxisSize: MainAxisSize.min, spacing: 3, children: widget.corner)),
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.965 : 1,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  transform: Matrix4.translationValues(0, _hover ? -5 : 0, 0),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _hover ? accent.withValues(alpha: 0.8) : p.line, width: _hover ? 1.5 : 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (_hover ? accent : Colors.black).withValues(alpha: _hover ? 0.28 : 0.12),
+                        blurRadius: _hover ? 22 : 6,
+                        spreadRadius: _hover ? -2 : 0,
+                        offset: Offset(0, _hover ? 10 : 2),
+                      ),
                     ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // the picture leans in a little under the pointer
+                        AnimatedScale(
+                          scale: _hover ? 1.06 : 1,
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeOutCubic,
+                          child: NetImage(widget.image, decodeWidth: widget.cover ? 720 : 360, alignment: widget.cover ? Alignment.centerRight : Alignment.center, poster: true),
+                        ),
+                        // a soft sheen at the bottom, so the badges and marks read on any poster
+                        IgnorePointer(
+                          child: AnimatedOpacity(
+                            opacity: _hover ? 1 : 0.0,
+                            duration: const Duration(milliseconds: 260),
+                            child: const DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment(0, 0.2),
+                                  colors: [Color(0x66000000), Color(0x00000000)],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(left: 7, top: 7, right: 7, child: Wrap(spacing: 4, runSpacing: 4, children: widget.badges)),
+                        if (widget.corner.isNotEmpty)
+                          Positioned(right: 7, bottom: 7, child: Row(mainAxisSize: MainAxisSize.min, spacing: 3, children: widget.corner)),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              widget.code,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              widget.subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: p.muted, fontSize: 12),
-            ),
-          ],
+              const SizedBox(height: 8),
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text),
+                child: Text(widget.code, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                widget.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: p.muted, fontSize: 12),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -498,4 +529,135 @@ class _Mark extends StatelessWidget {
     decoration: BoxDecoration(color: const Color(0xA6000000), borderRadius: BorderRadius.circular(9)),
     child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, height: 1.35)),
   );
+}
+
+/// Fades and rises into place when first built; [index] staggers a grid's first screen
+/// (later tiles, built while scrolling, come in without waiting).
+class Appear extends StatefulWidget {
+  const Appear({super.key, required this.child, this.index = 0, this.offset = 14});
+
+  final Widget child;
+  final int index;
+  final double offset;
+
+  @override
+  State<Appear> createState() => _AppearState();
+}
+
+class _AppearState extends State<Appear> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  Timer? _delay;
+
+  @override
+  void initState() {
+    super.initState();
+    final wait = widget.index < 18 ? widget.index * 28 : 0;
+    if (wait == 0) {
+      _c.forward();
+    } else {
+      _delay = Timer(Duration(milliseconds: wait), () {
+        if (mounted) _c.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _a,
+    builder: (_, child) => Opacity(
+      opacity: _a.value,
+      child: Transform.translate(offset: Offset(0, widget.offset * (1 - _a.value)), child: child),
+    ),
+    child: widget.child,
+  );
+}
+
+/// A soft light sweeping across [child] (the shapes of what is loading).
+class Shimmer extends StatefulWidget {
+  const Shimmer({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final base = dark ? const Color(0x18FFFFFF) : const Color(0x0F000000);
+    final light = dark ? const Color(0x30FFFFFF) : const Color(0x22FFFFFF);
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, child) => ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (r) {
+          final x = -1.0 + 3.0 * _c.value;
+          return LinearGradient(
+            begin: Alignment(x - 1, -0.3),
+            end: Alignment(x, 0.3),
+            colors: [base, light, base],
+            stops: const [0.2, 0.5, 0.8],
+          ).createShader(r);
+        },
+        child: child,
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+/// A grid of poster-shaped placeholders while a page loads.
+class SkeletonGrid extends StatelessWidget {
+  const SkeletonGrid({super.key, this.count = 18});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final compact = MediaQuery.sizeOf(context).width < 720;
+    Widget block(double h, {double? w}) => Container(
+      height: h,
+      width: w,
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(6)),
+    );
+    return Shimmer(
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(compact ? 14 : 28, 8, compact ? 14 : 28, 24),
+        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: compact ? 140 : 186,
+          mainAxisSpacing: compact ? 14 : 22,
+          crossAxisSpacing: compact ? 10 : 18,
+          childAspectRatio: 0.565,
+        ),
+        itemCount: count,
+        itemBuilder: (_, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: Container(decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(12)))),
+          const SizedBox(height: 10),
+          block(12, w: 90),
+          const SizedBox(height: 6),
+          block(10),
+        ]),
+      ),
+    );
+  }
 }

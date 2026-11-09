@@ -233,7 +233,7 @@ class LibraryPageState extends State<LibraryPage> {
     final placeholder = _error != null && _all.isEmpty
         ? ErrorBox(_error!, onRetry: load)
         : view.isEmpty
-        ? (_loading ? const Center(child: CircularProgressIndicator()) : const EmptyHint('没有符合条件的影片', icon: Icons.movie_filter_outlined))
+        ? (_loading ? const SkeletonGrid() : const EmptyHint('没有符合条件的影片', icon: Icons.movie_filter_outlined))
         : null;
     final gridPad = EdgeInsets.fromLTRB(pagePad(context), 8, pagePad(context), bottomGap(context));
     final grid = SliverGridDelegateWithMaxCrossAxisExtent(
@@ -244,7 +244,7 @@ class LibraryPageState extends State<LibraryPage> {
     );
     Widget tile(BuildContext context, int i) {
       final it = view[i];
-      return PosterTile(
+      return Appear(key: ValueKey('t-${it.id}'), index: i, child: PosterTile(
         image: it.poster ? App.api.media(it.id, 'poster.jpg', width: 360, version: it.posterVersion) : '',
         code: it.folder,
         subtitle: it.shortTitle,
@@ -256,7 +256,7 @@ class LibraryPageState extends State<LibraryPage> {
         ],
         corner: markBadges(it),
         onTap: () => _open(it),
-      );
+      ));
     }
 
     if (isCompact(context)) {

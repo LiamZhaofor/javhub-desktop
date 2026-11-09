@@ -340,7 +340,7 @@ class _ShellState extends State<Shell> {
       return Scaffold(
         // pages scroll on under the bar, which floats over them as frosted glass
         extendBody: true,
-        body: IndexedStack(index: _tab, children: pages),
+        body: FadeIndexedStack(index: _tab, children: pages),
         bottomNavigationBar: _GlassNavBar(
           selected: _tab,
           badges: {if (_activeJobs > 0) 3: '$_activeJobs', if (_newReleases > 0) 4: '$_newReleases'},
@@ -407,7 +407,7 @@ class _ShellState extends State<Shell> {
               ),
             ),
             Expanded(
-              child: IndexedStack(index: _tab, children: pages),
+              child: FadeIndexedStack(index: _tab, children: pages),
             ),
           ],
         ),
@@ -683,4 +683,43 @@ class ThemeToggle extends StatelessWidget {
       ),
     );
   }
+}
+
+/// An IndexedStack (every page keeps its state and scroll) whose page fades and rises in
+/// when the tab changes.
+class FadeIndexedStack extends StatefulWidget {
+  const FadeIndexedStack({super.key, required this.index, required this.children});
+
+  final int index;
+  final List<Widget> children;
+
+  @override
+  State<FadeIndexedStack> createState() => _FadeIndexedStackState();
+}
+
+class _FadeIndexedStackState extends State<FadeIndexedStack> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 260), value: 1);
+  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  @override
+  void didUpdateWidget(FadeIndexedStack old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index) _c.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _a,
+    builder: (_, child) => Opacity(
+      opacity: 0.25 + 0.75 * _a.value,
+      child: Transform.translate(offset: Offset(0, 10 * (1 - _a.value)), child: child),
+    ),
+    child: IndexedStack(index: widget.index, children: widget.children),
+  );
 }

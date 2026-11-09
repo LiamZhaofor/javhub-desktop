@@ -9,6 +9,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'settings.dart';
+import 'stream_proxy.dart' show trace;
 
 const _subtitleExts = ['srt', 'ass', 'ssa', 'vtt'];
 
@@ -202,6 +203,16 @@ class JavPlayerTools extends ChangeNotifier {
     return true;
   }
 
+  /// 快进 / 快退's step, kept for next time.
+  Future<void> setSeekStep(double s) async {
+    final fresh = await JavPlayerSettings.load(); // (the settings page may have changed others)
+    fresh.seekStep = s;
+    await fresh.save();
+    settings.seekStep = s;
+    notifyListeners();
+    toast('快进 / 快退：${s.toStringAsFixed(s % 1 == 0 ? 0 : 1)} 秒');
+  }
+
   Future<void> startAcceleration() async {
     if (_accelerating) return;
     _accelerating = true;
@@ -218,30 +229,72 @@ class JavPlayerTools extends ChangeNotifier {
     _speedBeforeAcceleration = null;
   }
 
-  /// Quick repeated presses become one seek: 115 counts every connection a
-  /// seek opens, so five taps must not be five requests.
+  /// The stretches of the movie mpv holds in memory (its demuxer cache), in seconds:
+  /// a seek into one of them needs no network.
+  Future<List<(double, double)>> cachedRanges() async {
+    try {
+      final j = jsonDecode(await getProperty('demuxer-cache-state'));
+      return [
+        for (final r in (j['seekable-ranges'] as List? ?? const []))
+          ((r['start'] as num).toDouble(), (r['end'] as num).toDouble()),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  int _burstMs = 0;
+  Timer? _burstTimer;
+
+  /// A jump of [seconds]. Into what is already buffered it happens at once (no
+  /// network, nothing to wait for); anywhere else quick repeated presses become one
+  /// seek: 115 counts every connection a seek opens, so five taps must not be five requests.
   void queueSeek(double seconds) {
-    _pendingSeekMs += (seconds * 1000).round();
-    final total = _pendingSeekMs / 1000;
+    final ms = (seconds * 1000).round();
+    trace('seek asked ${ms > 0 ? '+' : ''}$ms ms');
+    _pendingSeekMs += ms;
+    // the message adds up the presses of a burst, also those already done
+    _burstMs += ms;
+    _burstTimer?.cancel();
+    _burstTimer = Timer(const Duration(milliseconds: 1500), () => _burstMs = 0);
+    final total = _burstMs / 1000;
     toast('${total >= 0 ? '前进' : '后退'} ${total.abs().toStringAsFixed(total.abs() % 1 == 0 ? 0 : 1)} 秒');
     _seekTimer?.cancel();
-    _seekTimer = Timer(const Duration(milliseconds: 400), () {
-      final ms = _pendingSeekMs;
-      _pendingSeekMs = 0;
-      if (ms == 0 || _disposed) return;
-      final duration = player.state.duration;
-      // A 115 seek takes a moment: until it lands the position still reads the
-      // old place, and the next jump must build on the last target instead.
-      final now = DateTime.now();
-      final pending = _lastTarget != null && now.difference(_lastSeekAt) < const Duration(seconds: 4) &&
-          (player.state.position - _lastTarget!).abs() > const Duration(seconds: 2);
-      var target = (pending ? _lastTarget! : player.state.position) + Duration(milliseconds: ms);
-      if (target < Duration.zero) target = Duration.zero;
-      if (duration > Duration.zero && target > duration) target = duration - const Duration(seconds: 1);
-      _lastTarget = target;
-      _lastSeekAt = now;
-      unawaited(player.seek(target));
-    });
+    _seekTimer = Timer(const Duration(milliseconds: 400), _flushSeek);
+    final target = _targetOf(_pendingSeekMs);
+    final pendingNow = _pendingSeekMs;
+    unawaited(cachedRanges().then((ranges) {
+      final t = target.inMilliseconds / 1000;
+      // still the same press (no newer one, not flushed yet) and its target is in memory
+      if (_disposed || _pendingSeekMs != pendingNow || pendingNow == 0) return;
+      if (ranges.any((r) => t >= r.$1 && t <= r.$2 - 0.5)) {
+        _seekTimer?.cancel();
+        _flushSeek();
+      }
+    }));
+  }
+
+  /// Where a jump of [ms] from here lands. A 115 seek takes a moment: until it lands
+  /// the position still reads the old place, and the next jump builds on the last target.
+  Duration _targetOf(int ms) {
+    final duration = player.state.duration;
+    final pending = _lastTarget != null && DateTime.now().difference(_lastSeekAt) < const Duration(seconds: 4) &&
+        (player.state.position - _lastTarget!).abs() > const Duration(seconds: 2);
+    var target = (pending ? _lastTarget! : player.state.position) + Duration(milliseconds: ms);
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration - const Duration(seconds: 1);
+    return target;
+  }
+
+  void _flushSeek() {
+    final ms = _pendingSeekMs;
+    _pendingSeekMs = 0;
+    if (ms == 0 || _disposed) return;
+    final target = _targetOf(ms);
+    _lastTarget = target;
+    _lastSeekAt = DateTime.now();
+    trace('seek to ${target.inMilliseconds} ms');
+    unawaited(player.seek(target));
   }
 
   // ---------------- subtitles ----------------
@@ -314,6 +367,7 @@ class JavPlayerTools extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _seekTimer?.cancel();
+    _burstTimer?.cancel();
     _reapplyTimer?.cancel();
     unawaited(_tracksSub?.cancel());
     if (_accelerating) unawaited(player.setRate(_speedBeforeAcceleration ?? 1.0).catchError((_) {}));

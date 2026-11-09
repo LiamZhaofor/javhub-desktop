@@ -52,7 +52,7 @@ void main() {
     expect(j.active, isTrue);
     expect(j.log.single.$2, '开始');
     expect(Backend('cloud:115 Cloud', true).title, '115 网盘');
-    expect(Backend('qbittorrent', true).title, 'NAS 本地');
+    expect(Backend('qbittorrent', true).title, 'NAS（BT 下载）');
     expect(Backend('offline:PikPak', true).title, 'PikPak 离线 → NAS');
   });
 
@@ -121,5 +121,20 @@ void main() {
     expect(a.works.map((w) => w.inLibrary).toList(), ['SSIS-001', null]);
     expect(a.works.last.rating, 4.2);
     expect(a.works.last.wished && a.followed, isTrue);
+  });
+
+  test('a 115 destination lists the folders one can pick', () {
+    final b = Backends.fromJson({
+      'backends': [
+        {'name': 'cloud:115 Cloud', 'ok': true, 'dirs': ['/115/jav', '/115/其它'], 'dir': '/115/jav'},
+        {'name': 'qbittorrent', 'ok': true, 'dir': '/media/jav'},
+      ],
+      'default': 'cloud:115 Cloud',
+    });
+    expect(b.preferred, 'cloud:115 Cloud');
+    expect(b.items.first.dirs, ['/115/jav', '/115/其它']);
+    expect(b.items.first.dir, '/115/jav');
+    expect(b.items.last.dirs, isEmpty);
+    expect(b.items.last.dir, '/media/jav');
   });
 }

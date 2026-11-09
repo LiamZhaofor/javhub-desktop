@@ -136,10 +136,7 @@ class _MainWindowCloser with WindowListener {
 
 /// The main window's last step. Linux: destroying Flutter's (only) view crashes the engine
 /// on the way out, so the process just ends.
-void _quit() {
-  if (Platform.isLinux) exit(0);
-  unawaited(windowManager.destroy());
-}
+void _quit() => exit(0); // (tearing the engine down in order took seconds, and crashed it on Linux)
 
 /// `JavHub.exe --player <args>`: one movie in a window.
 Future<void> runPlayerWindow(String encoded) async {
@@ -163,15 +160,20 @@ Future<void> runPlayerWindow(String encoded) async {
       await windowManager.focus();
     },
   );
-  // the main window asks for this window again (the same movie played twice)
-  stdin.transform(utf8.decoder).transform(const LineSplitter()).listen((line) async {
-    if (line.trim() == 'focus') {
-      if (await windowManager.isMinimized()) await windowManager.restore();
-      await windowManager.show();
-      await windowManager.focus();
-    }
-  }, onError: (_) {}, cancelOnError: false);
   runApp(_PlayerWindowApp(args: args));
+  // the main window asks for this window again (the same movie played twice). After the
+  // first frame, and never fatal: without a pipe on stdin, reading it kept the window blank.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    try {
+      stdin.transform(utf8.decoder).transform(const LineSplitter()).listen((line) async {
+        if (line.trim() == 'focus') {
+          if (await windowManager.isMinimized()) await windowManager.restore();
+          await windowManager.show();
+          await windowManager.focus();
+        }
+      }, onError: (_) {}, cancelOnError: false);
+    } catch (_) {}
+  });
 }
 
 class _PlayerWindowApp extends StatelessWidget {

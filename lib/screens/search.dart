@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app.dart';
 import '../models.dart';
@@ -28,6 +27,9 @@ class SearchPageState extends State<SearchPage> {
   SearchResult? _result;
   Backends? _backends;
   String _dest = '';
+
+  /// A 115 destination: which library folder ('' = the usual one).
+  String _folder = '';
   bool _replace = false;
 
   Recs? _recs;
@@ -52,12 +54,13 @@ class SearchPageState extends State<SearchPage> {
   Future<void> _loadBackends() async {
     try {
       final b = await App.api.backends();
-      final saved = (await SharedPreferences.getInstance()).getString('dl.backend');
       final ok = b.items.where((x) => x.ok).map((x) => x.name).toList();
       if (!mounted) return;
       setState(() {
         _backends = b;
-        _dest = ok.contains(saved) ? saved! : (ok.contains(b.preferred) ? b.preferred : (ok.isEmpty ? '' : ok.first));
+        // every new movie starts at JavHub's default (115); a choice is for that download
+        _dest = ok.contains(b.preferred) ? b.preferred : (ok.isEmpty ? '' : ok.first);
+        _folder = '';
       });
     } catch (_) {}
   }
@@ -102,12 +105,12 @@ class SearchPageState extends State<SearchPage> {
       return;
     }
     try {
-      await (await SharedPreferences.getInstance()).setString('dl.backend', _dest);
-      final job = await App.api.createJob(code, magnet: magnet, backend: _dest, replace: _replace, subtitle: _policy);
+      final job = await App.api.createJob(code, magnet: magnet, backend: _dest, replace: _replace, subtitle: _policy, folder: _folder);
       widget.onJobCreated?.call();
       if (mounted) {
-        final dest = _backends?.items.where((b) => b.name == _dest).firstOrNull?.title ?? _dest;
-        toast(context, '已创建任务 ${job.code} → $dest，进度见「任务」页');
+        final b = _backends?.items.where((b) => b.name == _dest).firstOrNull;
+        final where = _folder.isNotEmpty ? _folder : (b?.dir ?? '');
+        toast(context, '已创建任务 ${job.code} → ${b?.title ?? _dest}${where.isEmpty ? '' : '（$where）'}，进度见「任务」页');
       }
     } catch (e) {
       if (mounted) toast(context, '创建失败：$e');
@@ -333,7 +336,10 @@ class SearchPageState extends State<SearchPage> {
                       for (final b in okBackends)
                         ChoiceChip(
                           selected: _dest == b.name,
-                          onSelected: (_) => setState(() => _dest = b.name),
+                          onSelected: (_) => setState(() {
+                            _dest = b.name;
+                            _folder = '';
+                          }),
                           label: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
@@ -345,6 +351,29 @@ class SearchPageState extends State<SearchPage> {
                         ),
                     ],
                   ),
+                Builder(builder: (context) {
+                  final b = okBackends.where((x) => x.name == _dest).firstOrNull;
+                  if (b == null) return const SizedBox.shrink();
+                  final where = b.dirs.length > 1
+                      ? DropdownButton<String>(
+                          value: _folder.isEmpty ? b.dir : _folder,
+                          isDense: true,
+                          underline: const SizedBox.shrink(),
+                          borderRadius: BorderRadius.circular(10),
+                          items: [for (final d in b.dirs) DropdownMenuItem(value: d, child: Text(d))],
+                          onChanged: (v) => setState(() => _folder = v == b.dir ? '' : (v ?? '')),
+                        )
+                      : Text(b.dir.isEmpty ? '' : b.dir, style: const TextStyle(fontWeight: FontWeight.w600));
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Row(children: [
+                      Icon(Icons.folder_open_rounded, size: 18, color: hint),
+                      const SizedBox(width: 6),
+                      Text('保存到  ', style: TextStyle(color: hint)),
+                      Flexible(child: where),
+                    ]),
+                  );
+                }),
                 if (offBackends.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),

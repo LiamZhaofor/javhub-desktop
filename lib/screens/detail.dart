@@ -254,6 +254,27 @@ class _DetailPageState extends State<DetailPage> {
         if (mounted) toast(context, '$e');
       }
       return;
+    } else if (act == 'to-nas') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('把 ${it.folder} 保存到 NAS？'),
+          content: Text('从 115 复制一份到 NAS 片库（${it.sources.map((s) => s.split('/').last).join('、')}），封面和资料一起带过去。'
+              '115 上的文件不动。进度在「任务」页。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('保存到 NAS')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      try {
+        await App.api.manage(it.id, 'to-nas');
+        if (mounted) toast(context, '开始从 115 复制到 NAS，进度见「任务」页');
+      } catch (e) {
+        if (mounted) toast(context, '$e');
+      }
+      return;
     } else if (act == 'remove') {
       final ok = await showDialog<bool>(
         context: context,
@@ -359,11 +380,13 @@ class _DetailPageState extends State<DetailPage> {
                           icon: const Icon(Icons.more_horiz_rounded),
                           style: IconButton.styleFrom(backgroundColor: p.raised.withValues(alpha: 0.7)),
                           onSelected: _manage,
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'rescrape', child: ListTile(leading: Icon(Icons.auto_fix_high_rounded), title: Text('重新刮削'), subtitle: Text('清除封面和资料重新获取'))),
-                            PopupMenuItem(value: 'recode', child: ListTile(leading: Icon(Icons.edit_rounded), title: Text('改番号…'), subtitle: Text('番号认错了'))),
-                            PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.remove_circle_outline_rounded, color: accent), title: Text('从片库移除'))),
-                            PopupMenuItem(value: 'block', child: ListTile(leading: Icon(Icons.block_rounded), title: Text('屏蔽'), subtitle: Text('不再出现在片库、首页和推荐里'))),
+                          itemBuilder: (_) => [
+                            if (it.cloud)
+                              const PopupMenuItem(value: 'to-nas', child: ListTile(leading: Icon(Icons.download_for_offline_rounded), title: Text('保存到 NAS'), subtitle: Text('从 115 复制一份到 NAS 片库'))),
+                            const PopupMenuItem(value: 'rescrape', child: ListTile(leading: Icon(Icons.auto_fix_high_rounded), title: Text('重新刮削'), subtitle: Text('清除封面和资料重新获取'))),
+                            const PopupMenuItem(value: 'recode', child: ListTile(leading: Icon(Icons.edit_rounded), title: Text('改番号…'), subtitle: Text('番号认错了'))),
+                            const PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.remove_circle_outline_rounded, color: accent), title: Text('从片库移除'))),
+                            const PopupMenuItem(value: 'block', child: ListTile(leading: Icon(Icons.block_rounded), title: Text('屏蔽'), subtitle: Text('不再出现在片库、首页和推荐里'))),
                           ],
                         ),
                       ]),

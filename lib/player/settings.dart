@@ -11,6 +11,7 @@ class JavPlayerSettings {
     this.backwardKey = 'c',
     this.accelerationRate = 3,
     this.skipSeconds = 5,
+    this.seekStep = 10,
     this.subtitleOffset = 0,
     this.subtitlePosition = 5,
     this.subtitleSize = 50,
@@ -28,6 +29,9 @@ class JavPlayerSettings {
   String backwardKey;
   double accelerationRate;
   double skipSeconds;
+
+  /// ← / →, the bar's buttons and a double tap on the phone jump this far.
+  double seekStep;
 
   /// Seconds; positive shows the subtitles later (mpv `sub-delay`).
   double subtitleOffset;
@@ -56,6 +60,7 @@ class JavPlayerSettings {
     'backwardKey': backwardKey,
     'accelerationRate': accelerationRate,
     'skipSeconds': skipSeconds,
+    'seekStep': seekStep,
     'subtitleOffset': subtitleOffset,
     'subtitlePosition': subtitlePosition,
     'subtitleSize': subtitleSize,
@@ -86,6 +91,7 @@ class JavPlayerSettings {
       backwardKey: key(j['backwardKey'], d.backwardKey),
       accelerationRate: num_(j['accelerationRate'], d.accelerationRate, 0.1, 16),
       skipSeconds: num_(j['skipSeconds'], d.skipSeconds, 0.1, 600),
+      seekStep: num_(j['seekStep'], d.seekStep, 1, 600),
       subtitleOffset: num_(j['subtitleOffset'], d.subtitleOffset, -600, 600),
       subtitlePosition: num_(j['subtitlePosition'], d.subtitlePosition, 0, 90),
       subtitleSize: num_(j['subtitleSize'], d.subtitleSize, 10, 150),

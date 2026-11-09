@@ -15,6 +15,7 @@ import '../platform.dart';
 import '../theme.dart';
 import '../widgets.dart' show ImageStore;
 import 'stream_proxy.dart';
+import 'touch_controls.dart';
 import 'tools.dart';
 
 class PlaySource {
@@ -57,6 +58,18 @@ String positionKey(String url) => 'pos.${url.split('?').first}';
 enum _Panel { subtitles, speed, settings }
 
 const _rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+
+/// The steps 快进 / 快退 can take.
+const seekSteps = [5.0, 10.0, 15.0, 30.0, 60.0];
+
+String _secs(double s) => s.toStringAsFixed(s % 1 == 0 ? 0 : 1);
+
+IconData _stepIcon(double s, {required bool back}) => switch (s) {
+  5 => back ? Icons.replay_5_rounded : Icons.forward_5_rounded,
+  10 => back ? Icons.replay_10_rounded : Icons.forward_10_rounded,
+  30 => back ? Icons.replay_30_rounded : Icons.forward_30_rounded,
+  _ => back ? Icons.fast_rewind_rounded : Icons.fast_forward_rounded,
+};
 const _fits = {BoxFit.contain: '适应', BoxFit.cover: '填充', BoxFit.fill: '拉伸'};
 
 class PlayerPage extends StatefulWidget {
@@ -289,11 +302,18 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
   @override
   void onWindowClose() => unawaited(_closeWindow());
 
+  bool _closing = false;
+
+  /// Gone at once: the window hides, the position is saved (a moment at most), and the
+  /// process ends - tearing the engine and mpv down in order took seconds (a stream
+  /// waiting on the network) and on Linux crashed the engine.
   Future<void> _closeWindow() async {
-    if (_resumeDone) await _savePosition().timeout(const Duration(seconds: 3), onTimeout: () {});
-    // Linux: destroying Flutter's (only) view crashes the engine on the way out - leave directly
-    if (Platform.isLinux) exit(0);
-    await windowManager.destroy();
+    if (_closing) return;
+    _closing = true;
+    unawaited(windowManager.hide());
+    unawaited(_player.pause().catchError((_) {}));
+    if (_resumeDone) await _savePosition().timeout(const Duration(milliseconds: 1500), onTimeout: () {});
+    exit(0);
   }
 
   static String get _device => platformName;
@@ -455,7 +475,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
         if (_rightAccelerating) {
           unawaited(_tools.stopAcceleration());
         } else if (held) {
-          _tools.queueSeek(10);
+          _tools.queueSeek(_tools.settings.seekStep);
         }
         _rightAccelerating = false;
       }
@@ -463,7 +483,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     }
     if (e is KeyDownEvent || e is KeyRepeatEvent) {
       if (key == LogicalKeyboardKey.arrowLeft) {
-        _tools.queueSeek(-10);
+        _tools.queueSeek(-_tools.settings.seekStep);
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
@@ -499,7 +519,17 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       onKeyEvent: (_, e) => _onKey(context, e),
       child: Stack(
         children: [
-          if (!isDesktop) MaterialVideoControls(state) else MaterialDesktopVideoControls(state),
+          if (!isDesktop)
+            TouchControls(
+              player: _player,
+              tools: _tools,
+              topBar: _touchTop(),
+              bottomBar: _touchBottom(),
+              drag: _dragF,
+              panelOpen: _panel,
+            )
+          else
+            MaterialDesktopVideoControls(state),
           if (!isDesktop) _dragPreview(),
           if (isDesktop) ...[
           // seek-bar previews: a strip over media_kit's seek bar (16 px side margins,
@@ -794,6 +824,26 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
               ]),
             ),
           ),
+          const _PanelLabel('快进 / 快退'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: AnimatedBuilder(
+              animation: _tools,
+              builder: (_, _) => Row(children: [
+                for (final s in seekSteps)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: _Segment(
+                        text: '${_secs(s)}秒',
+                        selected: _tools.settings.seekStep == s,
+                        onTap: () => unawaited(_tools.setSeekStep(s)),
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
           if (audio.length > 1) ...[
             const _PanelLabel('音轨'),
             for (final t in audio)
@@ -865,8 +915,20 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     ],
     bottomButtonBar: [
       const MaterialDesktopPlayOrPauseButton(),
-      _BarButton(icon: Icons.replay_10_rounded, tooltip: '后退 10 秒 (←)', onPressed: () => _tools.queueSeek(-10)),
-      _BarButton(icon: Icons.forward_10_rounded, tooltip: '前进 10 秒 (→，按住加速)', onPressed: () => _tools.queueSeek(10)),
+      AnimatedBuilder(
+        animation: _tools,
+        builder: (_, _) {
+          final s = _tools.settings.seekStep;
+          return _BarButton(icon: _stepIcon(s, back: true), tooltip: '后退 ${_secs(s)} 秒 (←)', onPressed: () => _tools.queueSeek(-s));
+        },
+      ),
+      AnimatedBuilder(
+        animation: _tools,
+        builder: (_, _) {
+          final s = _tools.settings.seekStep;
+          return _BarButton(icon: _stepIcon(s, back: false), tooltip: '前进 ${_secs(s)} 秒 (→，按住加速)', onPressed: () => _tools.queueSeek(s));
+        },
+      ),
       const MaterialDesktopVolumeButton(),
       const MaterialDesktopPositionIndicator(),
       const Spacer(),
@@ -919,20 +981,9 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     ),
   );
 
-  MaterialVideoControlsThemeData _touchTheme() => MaterialVideoControlsThemeData(
-    displaySeekBar: false, // ours, in the bottom bar: it shows the previews while dragging
-    seekBarPositionColor: accent,
-    seekBarThumbColor: accent,
-    seekOnDoubleTap: true,
-    seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
-    seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
-    volumeGesture: true,
-    brightnessGesture: true,
-    speedUpOnLongPress: true,
-    speedUpFactor: 3,
-    buttonBarHeight: 64,
-    topButtonBar: [
-      MaterialCustomButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => Navigator.of(context).maybePop()),
+  // The phone's bars (TouchControls draws them, and owns the gestures).
+  List<Widget> _touchTop() => [
+      IconButton(icon: const Icon(Icons.arrow_back_rounded, color: Colors.white), onPressed: () => Navigator.of(context).maybePop()),
       const SizedBox(width: 4),
       Expanded(
         child: Text(widget.title, overflow: TextOverflow.ellipsis,
@@ -945,10 +996,17 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
           decoration: BoxDecoration(color: const Color(0xFF2563EB), borderRadius: BorderRadius.circular(5)),
           child: const Text('115', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
         ),
-    ],
-    bottomButtonBar: [
-      const MaterialPlayOrPauseButton(),
-      const MaterialPositionIndicator(),
+    ];
+
+  List<Widget> _touchBottom() => [
+      StreamBuilder<bool>(
+        stream: _player.stream.playing,
+        builder: (_, _) => IconButton(
+          icon: Icon(_player.state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white),
+          onPressed: () => unawaited(_player.playOrPause()),
+        ),
+      ),
+      TouchClock(player: _player),
       const SizedBox(width: 8),
       Expanded(child: _TouchSeekBar(player: _player, drag: _dragF)),
       AnimatedBuilder(
@@ -969,31 +1027,25 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
         ),
       ),
       _BarButton(icon: Icons.settings_rounded, tooltip: '播放设置', onPressed: () => _toggle(_Panel.settings)),
-    ],
-  );
+    ];
 
   @override
   Widget build(BuildContext context) {
     if (!isDesktop) {
-      final theme = _touchTheme();
       return Scaffold(
         backgroundColor: Colors.black,
-        body: MaterialVideoControlsTheme(
-          normal: theme,
-          fullscreen: theme,
-          child: Video(
-            controller: _video,
-            controls: _controls,
-            subtitleViewConfiguration: const SubtitleViewConfiguration(
-              style: TextStyle(
-                fontSize: 30,
-                height: 1.35,
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                shadows: [Shadow(blurRadius: 4), Shadow(blurRadius: 8), Shadow(offset: Offset(1, 1), blurRadius: 2)],
-              ),
-              padding: EdgeInsets.fromLTRB(24, 0, 24, 28),
+        body: Video(
+          controller: _video,
+          controls: _controls,
+          subtitleViewConfiguration: const SubtitleViewConfiguration(
+            style: TextStyle(
+              fontSize: 30,
+              height: 1.35,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              shadows: [Shadow(blurRadius: 4), Shadow(blurRadius: 8), Shadow(offset: Offset(1, 1), blurRadius: 2)],
             ),
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 28),
           ),
         ),
       );

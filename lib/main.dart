@@ -5,14 +5,54 @@ import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'player/player_page.dart';
+import 'player/stream_proxy.dart';
+import 'theme.dart';
 import 'player/player_window.dart';
 
 // --dart-define=JAVHUB_PHONE=true: a phone-sized window, to try the phone layout on a PC
 const _phone = bool.fromEnvironment('JAVHUB_PHONE');
 
+// --dart-define=JAVHUB_TEST_PLAYER=<a video file>: a test build that opens the player on that
+// file straight away (trying the player's controls without the library or the network)
+const _testPlayer = String.fromEnvironment('JAVHUB_TEST_PLAYER');
+
+// --dart-define=JAVHUB_TEST_ITEM=<library id of a 115 movie>: a test build that plays that movie
+// through the 115 proxy straight away - not saved as progress, not counted as watched
+const _testItem = String.fromEnvironment('JAVHUB_TEST_ITEM');
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  if (_testItem.isNotEmpty) {
+    await App.api.restore();
+    try {
+      await App.api.me();
+    } catch (_) {}
+    final it = await App.api.libraryItem(_testItem);
+    final path = it.sources.first.split('/').map(Uri.encodeComponent).join('/');
+    final url = App.api.url('/play/ol$path', {'mode': 'direct', 'relay': '0'});
+    final local = await JavStreamProxy.instance.wrap(url, headers: {...App.api.authHeaders, 'X-Jav-Prefetch': '1'});
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(Brightness.dark),
+      home: PlayerPage(title: 'Seek test', code: '', resume: false, source: PlaySource(url: local, cloud: true, local: true)),
+    ));
+    return;
+  }
+  if (_testPlayer.isNotEmpty) {
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(Brightness.dark),
+      home: const PlayerPage(
+        title: 'Player test',
+        code: 'TEST-001',
+        resume: false,
+        source: PlaySource(url: _testPlayer, cloud: false, local: true),
+      ),
+    ));
+    return;
+  }
   if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     runApp(const App());
     return;

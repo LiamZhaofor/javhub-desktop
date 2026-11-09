@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import '../app.dart';
 import '../models.dart';
 import '../platform.dart';
+import '../player/player_page.dart' show seekSteps;
 import '../player/settings.dart';
 import '../widgets.dart' show NetImage, toast;
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.5.5';
+const appVersion = '0.5.6';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -94,6 +95,7 @@ class SettingsPage extends StatelessWidget {
                     subtitle: Text('播放器进度条下方的「字幕」按钮：开关字幕、切换字幕轨、按番号在线搜索字幕', style: TextStyle(color: p.muted)),
                   ),
                   const _AutoSubtitleTile(),
+                  const _SeekStepTile(),
                   ListTile(
                     leading: const Icon(Icons.history_rounded),
                     title: const Text('记住播放位置'),
@@ -103,7 +105,7 @@ class SettingsPage extends StatelessWidget {
                 if (isDesktop) section('播放器快捷键', [
                   for (final (keys, what) in const [
                     ('空格', '播放 / 暂停'),
-                    ('← / →', '后退 / 前进 10 秒（连按合并为一次跳转）'),
+                    ('← / →', '后退 / 前进（步长见上方「快进 / 快退」，连按合并为一次跳转）'),
                     ('→（按住）', '3 倍速，松开恢复（同 Z）'),
                     ('↑ / ↓', '音量'),
                     ('Z（按住）', '3 倍速，松开恢复'),
@@ -273,4 +275,49 @@ class _BlockedListState extends State<_BlockedList> {
         TextButton(onPressed: () => setState(() => _expanded = true), child: Text('显示全部 ${items.length} 部')),
     ]);
   }
+}
+
+/// 设置 → 播放: how far ← / →, the bar's buttons and a double tap jump.
+class _SeekStepTile extends StatefulWidget {
+  const _SeekStepTile();
+
+  @override
+  State<_SeekStepTile> createState() => _SeekStepTileState();
+}
+
+class _SeekStepTileState extends State<_SeekStepTile> {
+  double? _step;
+
+  @override
+  void initState() {
+    super.initState();
+    JavPlayerSettings.load().then((s) {
+      if (mounted) setState(() => _step = s.seekStep);
+    });
+  }
+
+  Future<void> _set(double v) async {
+    final s = await JavPlayerSettings.load();
+    s.seekStep = v;
+    await s.save();
+    if (mounted) setState(() => _step = v);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    ListTile(
+      leading: const Icon(Icons.fast_forward_rounded),
+      title: const Text('快进 / 快退'),
+      subtitle: Text(isDesktop ? '← / → 键、进度条旁的按钮每次跳多少秒' : '双击屏幕左右两侧每次跳多少秒', style: TextStyle(color: Palette.of(context).muted)),
+    ),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: SegmentedButton<double>(
+        showSelectedIcon: false,
+        segments: [for (final s in seekSteps) ButtonSegment(value: s, label: Text('${s.toInt()} 秒'))],
+        selected: {_step ?? 10},
+        onSelectionChanged: _step == null ? null : (v) => _set(v.first),
+      ),
+    ),
+  ]);
 }
