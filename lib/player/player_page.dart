@@ -15,6 +15,7 @@ import '../platform.dart';
 import '../theme.dart';
 import '../widgets.dart' show ImageStore;
 import 'stream_proxy.dart';
+import 'android_playback.dart';
 import 'touch_controls.dart';
 import '../motion.dart';
 import '../window_frame.dart';
@@ -175,6 +176,57 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       unawaited(SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]));
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky));
     }
+    if (AndroidPlayback.supported) {
+      _android = AndroidPlayback(
+        player: _player,
+        title: widget.title,
+        subtitle: widget.code.isEmpty ? 'JavHub' : '${widget.code} · JavHub',
+        onCommand: _systemCommand,
+      )..start();
+      _android!.inSmallWindow.addListener(_onSmallWindow);
+      unawaited(_loadArtwork());
+    }
+  }
+
+  // ---------------- 小窗, 流体云 (Android) ----------------
+
+  AndroidPlayback? _android;
+
+  /// From the small window's buttons, the notification / 流体云, a headset.
+  void _systemCommand(String cmd) {
+    final step = _tools.settings.seekStep;
+    switch (cmd) {
+      case 'play':
+        unawaited(_player.play());
+      case 'pause':
+        unawaited(_player.pause());
+      case 'toggle':
+        unawaited(_player.playOrPause());
+      case 'rewind':
+        _tools.queueSeek(-step);
+      case 'forward':
+        _tools.queueSeek(step);
+      default:
+        if (cmd.startsWith('seek:')) {
+          final ms = int.tryParse(cmd.substring(5));
+          if (ms != null) unawaited(_player.seek(Duration(milliseconds: ms)));
+        }
+    }
+  }
+
+  void _onSmallWindow() {
+    // in the small window: only the picture (and no menu left open)
+    if (_android?.inSmallWindow.value ?? false) _panel.value = null;
+    if (mounted) setState(() {});
+  }
+
+  /// The poster for the notification and 流体云.
+  Future<void> _loadArtwork() async {
+    if (widget.itemId.isEmpty) return;
+    try {
+      final bytes = await ImageStore.instance.load(App.api.media(widget.itemId, 'poster.jpg', width: 360), App.api.authHeaders);
+      if (bytes != null && mounted) _android?.artwork = bytes;
+    } catch (_) {}
   }
 
   /// The sprite sheet behind the seek-bar previews. JavHub makes it on the first
@@ -362,8 +414,11 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     for (final n in [_panel, _fit, _hwdec, _stats, _statsText, _hoverX, _dragF]) {
       n.dispose();
     }
+    _android?.inSmallWindow.removeListener(_onSmallWindow);
+    _android?.stop();
     if (!isDesktop) {
-      unawaited(SystemChrome.setPreferredOrientations(const []));
+      // back to the app: upright
+      unawaited(SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]));
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
     _sprite?.dispose();
@@ -516,7 +571,9 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
 
   // The context of the controls themselves (not state.context, which stays the
   // non-fullscreen Video's): isFullscreen / exitFullscreen need the route they are in.
-  Widget _controls(VideoState state) => Builder(builder: (context) => _overlay(state, context));
+  Widget _controls(VideoState state) => Builder(
+    builder: (context) => (_android?.inSmallWindow.value ?? false) ? const SizedBox.shrink() : _overlay(state, context),
+  );
 
   Widget _overlay(VideoState state, BuildContext context) {
     return Focus(
@@ -675,12 +732,21 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
                     Positioned(
                       right: 16,
                       bottom: 76,
-                      child: _PanelBox(
+                      // (a phone held sideways is short: the menu scrolls instead of running off the top)
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height - 76 - 12),
+                        child: _PanelBox(
+                        // (none of the menu's lists may take the page's scroll controller: on a
+                        // phone two of them claimed it and the subtitle menu never drew)
+                        child: SingleChildScrollView(
+                        primary: false,
                         child: switch (panel) {
                           _Panel.subtitles => _subtitlePanel(),
                           _Panel.speed => _speedPanel(),
                           _Panel.settings => _settingsPanel(state),
                         },
+                        ),
+                      ),
                       ),
                     ),
                   ]),
@@ -717,18 +783,35 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _PanelTitle('字幕', trailing: Switch(value: _tools.subtitlesOn, onChanged: (v) => _tools.setSubtitlesOn(v))),
+                  // no subtitles at all (a loaded one stays, to come back to). Shown whenever there
+                  // is one: on Android a loaded online subtitle is not listed as a track.
+                  if (tracks.isNotEmpty || _tools.loadedOnline.isNotEmpty)
+                    _MenuRow(
+                      icon: Icons.subtitles_off_outlined,
+                      selected: !_tools.subtitlesOn,
+                      title: '关闭字幕',
+                      onTap: () async {
+                        if (_tools.subtitlesOn) await _tools.setSubtitlesOn(false);
+                        setLocal(() {});
+                      },
+                    ),
                   if (tracks.isNotEmpty) ...[
                     const _PanelLabel('字幕轨'),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 150),
-                      child: ListView(shrinkWrap: true, children: [
+                      child: ListView(shrinkWrap: true, primary: false, children: [
                         for (final t in tracks)
                           _MenuRow(
                             selected: t.id == sid.data && _tools.subtitlesOn,
                             title: t.title ?? t.language ?? '字幕 ${t.id}',
                             onTap: () async {
-                              await _player.setSubtitleTrack(t);
-                              if (!_tools.subtitlesOn) await _tools.setSubtitlesOn(true);
+                              // the one showing, tapped again: off
+                              if (t.id == sid.data && _tools.subtitlesOn) {
+                                await _tools.setSubtitlesOn(false);
+                              } else {
+                                await _player.setSubtitleTrack(t);
+                                if (!_tools.subtitlesOn) await _tools.setSubtitlesOn(true);
+                              }
                               setLocal(() {});
                             },
                           ),
@@ -764,14 +847,18 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
                         ? const Padding(padding: EdgeInsets.fromLTRB(14, 4, 14, 12), child: Text('没有找到在线字幕', style: TextStyle(color: Colors.white54, fontSize: 12.5)))
                         : ConstrainedBox(
                             constraints: const BoxConstraints(maxHeight: 260),
-                            child: ListView(shrinkWrap: true, children: [
+                            child: ListView(shrinkWrap: true, primary: false, children: [
                               for (final s in _online!)
                                 _MenuRow(
-                                  selected: _tools.loadedOnline.contains(s.url),
+                                  selected: _tools.loadedOnline.contains(s.url) && _tools.subtitlesOn,
                                   title: s.name,
                                   subtitle: [s.ext.toUpperCase(), if (s.duration != null) fmtClock(s.duration!), if (s.extra.isNotEmpty) s.extra].join(' · '),
                                   tag: s.fits(video) ? '推荐' : null,
-                                  onTap: () => _tools.loadOnlineSubtitle(s).then((_) => refresh(() {})),
+                                  // loaded already: tapping it turns subtitles off (and on again)
+                                  onTap: () => (_tools.loadedOnline.contains(s.url)
+                                          ? _tools.setSubtitlesOn(!_tools.subtitlesOn)
+                                          : _tools.loadOnlineSubtitle(s))
+                                      .then((_) => refresh(() {})),
                                 ),
                             ]),
                           ),

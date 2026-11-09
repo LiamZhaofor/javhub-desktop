@@ -31,9 +31,15 @@ class _AppState extends State<App> {
   // null: still checking the stored session
   bool? _loggedIn;
 
+  /// The start animation has had its moment (it is not cut short by a fast session check).
+  bool _introDone = false;
+
   @override
   void initState() {
     super.initState();
+    Future<void>.delayed(const Duration(milliseconds: 750), () {
+      if (mounted) setState(() => _introDone = true);
+    });
     App.api.onUnauthorized = () {
       if (mounted && _loggedIn == true) setState(() => _loggedIn = false);
     };
@@ -73,11 +79,24 @@ class _AppState extends State<App> {
       darkTheme: buildTheme(Brightness.dark),
       themeMode: mode,
       themeAnimationDuration: const Duration(milliseconds: 200),
-      home: switch (_loggedIn) {
-        null => const Scaffold(body: Center(child: CircularProgressIndicator())),
-        false => LoginPage(onDone: () => setState(() => _loggedIn = true)),
-        true => Shell(onLogout: () => setState(() => _loggedIn = false)),
-      },
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 520),
+        switchInCurve: Motion.standard,
+        switchOutCurve: Motion.exit,
+        // the logo grows away and fades; the app comes in from a touch smaller
+        transitionBuilder: (child, a) {
+          final leaving = child.key == const ValueKey('intro');
+          return FadeTransition(
+            opacity: a,
+            child: ScaleTransition(scale: Tween(begin: leaving ? 1.12 : 0.94, end: 1.0).animate(a), child: child),
+          );
+        },
+        child: _loggedIn == null || !_introDone
+            ? const _Intro(key: ValueKey('intro'))
+            : _loggedIn == false
+            ? LoginPage(key: const ValueKey('login'), onDone: () => setState(() => _loggedIn = true))
+            : Shell(key: const ValueKey('shell'), onLogout: () => setState(() => _loggedIn = false)),
+      ),
     ),
   );
 }
@@ -738,4 +757,63 @@ class _AppScroll extends MaterialScrollBehavior {
   ScrollPhysics getScrollPhysics(BuildContext context) => isDesktop
       ? super.getScrollPhysics(context)
       : const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+}
+
+/// The first frames: the icon the system's splash showed, settling in with a spring, a soft
+/// glow breathing behind it, the name rising under it.
+class _Intro extends StatefulWidget {
+  const _Intro({super.key});
+
+  @override
+  State<_Intro> createState() => _IntroState();
+}
+
+class _IntroState extends State<_Intro> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Scaffold(
+      backgroundColor: p.bg,
+      body: Center(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) {
+            final t = _c.value;
+            final pop = Motion.spring.transform((t / 0.7).clamp(0.0, 1.0));
+            final rise = Motion.standard.transform(((t - 0.25) / 0.75).clamp(0.0, 1.0));
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              Stack(alignment: Alignment.center, children: [
+                // the glow
+                Container(
+                  width: 150,
+                  height: 150,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [accent.withValues(alpha: 0.28 * rise), accent.withValues(alpha: 0)]),
+                  ),
+                ),
+                Transform.scale(scale: 0.72 + 0.28 * pop, child: const Logo(size: 84)),
+              ]),
+              const SizedBox(height: 6),
+              Opacity(
+                opacity: rise,
+                child: Transform.translate(
+                  offset: Offset(0, 14 * (1 - rise)),
+                  child: Text('JavHub', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: p.text, letterSpacing: 0.4)),
+                ),
+              ),
+            ]);
+          },
+        ),
+      ),
+    );
+  }
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -55,6 +56,8 @@ Future<void> main(List<String> args) async {
     return;
   }
   if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    // the phone: upright everywhere; the player turns it sideways while it is open
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     runApp(const App());
     return;
   }
