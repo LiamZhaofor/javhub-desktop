@@ -25,7 +25,10 @@ const _testItem = String.fromEnvironment('JAVHUB_TEST_ITEM');
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  final phone = !(Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+  // (the phone loads the player engine - a big native library - when a movie first opens
+  // (PlayerPage), not before the app's first frame: the start shows sooner)
+  if (!phone) MediaKit.ensureInitialized();
   if (_testItem.isNotEmpty) {
     await App.api.restore();
     try {
@@ -55,7 +58,7 @@ Future<void> main(List<String> args) async {
     ));
     return;
   }
-  if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+  if (phone) {
     // the phone: upright everywhere; the player turns it sideways while it is open
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     runApp(const App());

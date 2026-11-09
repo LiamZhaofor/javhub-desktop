@@ -2,5 +2,4 @@
 <resources>
     <!-- the app's backgrounds (theme.dart Palette.light / .dark bg) -->
     <color name="launch_bg">#F4F5F7</color>
-    <color name="launch_icon_bg">#FFFFFF</color>
 </resources>

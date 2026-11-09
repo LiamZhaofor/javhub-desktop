@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+: the system's own splash (icon popping in on the app's background) -->
+    <!-- Android 12+: the system's splash is only the app's background, no icon (no icon growing
+         out of the launcher); the logo comes in with the app's own intro -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowSplashScreenBackground">@color/launch_bg</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/launch_icon_bg</item>
-        <item name="android:windowSplashScreenAnimationDuration">400</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_empty</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/launch_bg</item>
         <item name="android:windowBackground">@color/launch_bg</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">

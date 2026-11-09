@@ -11,7 +11,7 @@ import '../widgets.dart' show NetImage, toast;
 import '../theme.dart';
 import '../updater.dart';
 
-const appVersion = '0.5.8';
+const appVersion = '0.5.9';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.onLogout});
@@ -95,6 +95,7 @@ class SettingsPage extends StatelessWidget {
                     subtitle: Text('播放器进度条下方的「字幕」按钮：开关字幕、切换字幕轨、按番号在线搜索字幕', style: TextStyle(color: p.muted)),
                   ),
                   const _AutoSubtitleTile(),
+                  if (Platform.isAndroid) const _SmallWindowTile(),
                   const _SeekStepTile(),
                   ListTile(
                     leading: const Icon(Icons.history_rounded),
@@ -184,6 +185,46 @@ class _AutoSubtitleTileState extends State<_AutoSubtitleTile> {
               // the player may have changed other settings since: start from the stored ones
               final fresh = await JavPlayerSettings.load();
               fresh.autoSubtitle = v;
+              await fresh.save();
+              if (mounted) setState(() => _s = fresh);
+            },
+    );
+  }
+}
+
+/// Android: going home while a movie plays carries on in a small window, or pauses.
+class _SmallWindowTile extends StatefulWidget {
+  const _SmallWindowTile();
+
+  @override
+  State<_SmallWindowTile> createState() => _SmallWindowTileState();
+}
+
+class _SmallWindowTileState extends State<_SmallWindowTile> {
+  JavPlayerSettings? _s;
+
+  @override
+  void initState() {
+    super.initState();
+    JavPlayerSettings.load().then((s) {
+      if (mounted) setState(() => _s = s);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _s;
+    return SwitchListTile(
+      secondary: const Icon(Icons.picture_in_picture_alt_outlined),
+      title: const Text('回到桌面时小窗播放'),
+      subtitle: Text('播放时回到桌面，影片缩成小窗接着播；关掉则暂停。播放器右上角的小窗按钮随时可用',
+          style: TextStyle(color: Palette.of(context).muted)),
+      value: s?.smallWindow ?? true,
+      onChanged: s == null
+          ? null
+          : (v) async {
+              final fresh = await JavPlayerSettings.load();
+              fresh.smallWindow = v;
               await fresh.save();
               if (mounted) setState(() => _s = fresh);
             },

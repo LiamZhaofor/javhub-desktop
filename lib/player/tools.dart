@@ -213,6 +213,16 @@ class JavPlayerTools extends ChangeNotifier {
     toast('快进 / 快退：${s.toStringAsFixed(s % 1 == 0 ? 0 : 1)} 秒');
   }
 
+  /// 小窗 on going home (Android), kept for next time.
+  Future<void> setSmallWindow(bool on) async {
+    final fresh = await JavPlayerSettings.load();
+    fresh.smallWindow = on;
+    await fresh.save();
+    settings.smallWindow = on;
+    notifyListeners();
+    toast(on ? '回到桌面时小窗播放' : '回到桌面时暂停，不开小窗');
+  }
+
   Future<void> startAcceleration() async {
     if (_accelerating) return;
     _accelerating = true;

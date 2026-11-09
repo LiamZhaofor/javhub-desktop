@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -439,123 +440,343 @@ class _ShellState extends State<Shell> {
   }
 }
 
-/// The phone's navigation: a rounded bar of frosted glass floating above the page,
-/// a lighter glass lens sliding to the chosen tab.
-class _GlassNavBar extends StatelessWidget {
+/// The phone's navigation, in liquid glass: a rounded bar of frosted glass floating above
+/// the page, with a glass lens on the chosen tab.
+///  - tap a tab: the lens flows over to it, bulging a little on the way;
+///  - press and slide along the bar: the lens lifts off it and swells into clear glass that
+///    magnifies the icon under it, follows the finger (stretching with the speed, a tick at
+///    each tab), and drops onto the tab it is let go over. Pulled past either end, it and the
+///    bar give like rubber.
+class _GlassNavBar extends StatefulWidget {
   const _GlassNavBar({required this.selected, required this.onSelect, this.badges = const {}});
 
   final int selected;
   final ValueChanged<int> onSelect;
   final Map<int, String> badges;
 
+  @override
+  State<_GlassNavBar> createState() => _GlassNavBarState();
+}
+
+class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixin {
   static const _radius = 28.0;
+  static const _height = 66.0;
+  static const _inset = 5.0;
+
+  // the lens to its tab, a little bounce at the end
+  static final _flow = SpringDescription.withDampingRatio(mass: 1, stiffness: 300, ratio: 0.7);
+  // the lens after the finger: close behind, a touch of lag (that is where its stretch comes from)
+  static final _chase = SpringDescription.withDampingRatio(mass: 1, stiffness: 1000, ratio: 0.92);
+  // lifting off and settling back
+  static final _swell = SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 0.6);
+
+  /// The lens centre in tabs (0 = the first); fractional while it moves.
+  late final AnimationController _pos = AnimationController.unbounded(vsync: this, value: widget.selected.toDouble());
+
+  /// 0 resting on the bar, 1 lifted off it under a finger.
+  late final AnimationController _lift = AnimationController.unbounded(vsync: this);
+
+  int _target = 0;
+  bool _dragging = false;
+  int _hover = 0;
+  double _tabW = 1;
+
+  int get _n => _nav.length;
+
+  @override
+  void initState() {
+    super.initState();
+    _target = widget.selected;
+  }
+
+  @override
+  void didUpdateWidget(_GlassNavBar old) {
+    super.didUpdateWidget(old);
+    // (switched from elsewhere, or by a tap: flow over, unless it is on its way there already)
+    if (!_dragging && widget.selected != _target) _flowTo(widget.selected, bulge: true);
+  }
+
+  @override
+  void dispose() {
+    _pos.dispose();
+    _lift.dispose();
+    super.dispose();
+  }
+
+  void _flowTo(int i, {double? velocity, bool bulge = false}) {
+    _target = i;
+    unawaited(_pos.animateWith(SpringSimulation(_flow, _pos.value, i.toDouble(), velocity ?? _pos.velocity)));
+    _liftTo(0, velocity: bulge ? 4.5 : null);
+  }
+
+  void _liftTo(double to, {double? velocity}) =>
+      unawaited(_lift.animateWith(SpringSimulation(_swell, _lift.value, to, velocity ?? _lift.velocity)));
+
+  /// The finger x as a lens position; past either end it is held back like rubber.
+  double _tabAt(double dx) {
+    final t = dx / _tabW - 0.5;
+    final last = _n - 1.0;
+    double rubber(double over) => 0.55 * (1 - 1 / (over + 1));
+    if (t < 0) return -rubber(-t);
+    if (t > last) return last + rubber(t - last);
+    return t;
+  }
+
+  void _follow(double dx) {
+    final t = _tabAt(dx);
+    unawaited(_pos.animateWith(SpringSimulation(_chase, _pos.value, t, _pos.velocity)));
+    final h = t.round().clamp(0, _n - 1);
+    if (h != _hover) {
+      _hover = h;
+      unawaited(HapticFeedback.selectionClick());
+    }
+  }
+
+  // a finger on the bar: the lens swells a little (a tap carries on to the tab, a slide lifts it)
+  void _down(DragDownDetails d) => _liftTo(0.35);
+
+  void _cancel() {
+    if (!_dragging) _liftTo(0);
+  }
+
+  void _start(DragStartDetails d) {
+    _dragging = true;
+    _hover = _pos.value.round().clamp(0, _n - 1);
+    _liftTo(1);
+    _follow(d.localPosition.dx - _inset);
+  }
+
+  void _end(DragEndDetails d) {
+    _dragging = false;
+    final v = _pos.velocity;
+    // a flick carries on a bit
+    final to = (_pos.value + v * 0.06).round().clamp(0, _n - 1);
+    _flowTo(to, velocity: v);
+    if (to != widget.selected) widget.onSelect(to);
+  }
 
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final radius = BorderRadius.circular(_radius);
+    final bar = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: dark ? 0.45 : 0.16), blurRadius: 30, offset: const Offset(0, 12)),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              // a see-through tint, lit a little more along the top, with a bright rim
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: dark
+                    ? [
+                        Color.alphaBlend(Colors.white.withValues(alpha: 0.10), p.raised).withValues(alpha: 0.62),
+                        p.raised.withValues(alpha: 0.48),
+                      ]
+                    : [Colors.white.withValues(alpha: 0.82), Colors.white.withValues(alpha: 0.58)],
+              ),
+              border: Border.all(color: Colors.white.withValues(alpha: dark ? 0.14 : 0.75)),
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
     return Padding(
       padding: EdgeInsets.fromLTRB(14, 0, 14, 10 + MediaQuery.paddingOf(context).bottom),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: dark ? 0.45 : 0.16),
-              blurRadius: 30,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: radius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Container(
-              height: 66,
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                // a see-through tint, lit a little more along the top, with a bright rim
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: dark
-                      ? [
-                          Color.alphaBlend(Colors.white.withValues(alpha: 0.10), p.raised).withValues(alpha: 0.62),
-                          p.raised.withValues(alpha: 0.48),
-                        ]
-                      : [Colors.white.withValues(alpha: 0.82), Colors.white.withValues(alpha: 0.58)],
-                ),
-                border: Border.all(color: Colors.white.withValues(alpha: dark ? 0.14 : 0.75)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(5),
-                child: LayoutBuilder(
-                  builder: (context, c) {
-                    final w = c.maxWidth / _nav.length;
-                    return Stack(
+      child: SizedBox(
+        height: _height,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            _tabW = (c.maxWidth - 2 * _inset) / _n;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragDown: _down,
+              onHorizontalDragCancel: _cancel,
+              onHorizontalDragStart: _start,
+              onHorizontalDragUpdate: (d) => _follow(d.localPosition.dx - _inset),
+              onHorizontalDragEnd: _end,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_pos, _lift]),
+                child: bar,
+                builder: (context, bar) {
+                  final pos = _pos.value;
+                  final lift = _lift.value.clamp(-0.3, 1.4);
+                  final speed = _pos.velocity.abs(); // tabs a second
+                  // pulled past an end: the bar gives a little that way
+                  final over = pos < 0 ? pos : (pos > _n - 1 ? pos - (_n - 1) : 0.0);
+                  // the lens: lifted it swells past the bar edges; moving fast it stretches
+                  final stretch = (speed * 0.035).clamp(0.0, 0.32);
+                  final lw = _tabW * (1 + 0.2 * lift) * (1 + stretch);
+                  final lh = (_height - 2 * _inset + 18 * lift) * (1 - 0.3 * stretch);
+                  final cx = _inset + (pos + 0.5) * _tabW;
+                  return Transform(
+                    alignment: over < 0 ? Alignment.centerRight : Alignment.centerLeft,
+                    transform: Matrix4.diagonal3Values(1 + over.abs() * 0.06, 1 - over.abs() * 0.04, 1),
+                    child: Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        AnimatedPositioned(
-                          duration: Motion.settle,
-                          curve: Motion.spring,
-                          left: w * selected,
-                          top: 0,
-                          bottom: 0,
-                          width: w,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(_radius - 5),
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  accent.withValues(alpha: dark ? 0.30 : 0.16),
-                                  accent.withValues(alpha: dark ? 0.16 : 0.08),
-                                ],
-                              ),
-                              border: Border.all(color: Colors.white.withValues(alpha: dark ? 0.16 : 0.9)),
+                        Positioned.fill(child: bar!),
+                        Positioned(
+                          left: cx - lw / 2,
+                          top: _height / 2 - lh / 2,
+                          width: lw,
+                          height: lh,
+                          child: IgnorePointer(
+                            child: CustomPaint(painter: _LensPainter(lift: lift.clamp(0.0, 1.0), dark: dark)),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: Padding(
+                            padding: const EdgeInsets.all(_inset),
+                            child: Row(
+                              children: [
+                                for (var i = 0; i < _n; i++)
+                                  Expanded(
+                                    child: _GlassNavItem(
+                                      item: _nav[i],
+                                      selected: i == widget.selected,
+                                      // how much of the lens is over this tab
+                                      near: (1 - (pos - i).abs()).clamp(0.0, 1.0),
+                                      lift: lift.clamp(0.0, 1.0),
+                                      badge: widget.badges[i],
+                                      onTap: () => widget.onSelect(i),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
-                        Row(
-                          children: [
-                            for (var i = 0; i < _nav.length; i++)
-                              Expanded(
-                                child: _GlassNavItem(
-                                  item: _nav[i],
-                                  selected: i == selected,
-                                  badge: badges[i],
-                                  onTap: () => onSelect(i),
-                                ),
-                              ),
-                          ],
-                        ),
                       ],
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
+/// The lens: resting, a pill of accent-tinted glass; lifted, clear glass with a bright rim
+/// catching the light top left and bottom right, a soft highlight and a shadow under it.
+class _LensPainter extends CustomPainter {
+  const _LensPainter({required this.lift, required this.dark});
+
+  final double lift;
+  final bool dark;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final r = RRect.fromRectAndRadius(rect, Radius.circular(size.height / 2));
+    final rest = 1 - lift;
+    // the shadow it casts once lifted
+    if (lift > 0.01) {
+      canvas.drawRRect(
+        r.shift(Offset(0, 5 * lift)),
+        Paint()
+          ..color = Colors.black.withValues(alpha: (dark ? 0.38 : 0.16) * lift)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10 * lift),
+      );
+    }
+    // the glass: the accent tint resting, clear (a little white) lifted
+    final top = Color.lerp(
+      Colors.white.withValues(alpha: dark ? 0.14 : 0.42),
+      accent.withValues(alpha: dark ? 0.30 : 0.16),
+      rest,
+    )!;
+    final bottom = Color.lerp(
+      Colors.white.withValues(alpha: dark ? 0.05 : 0.16),
+      accent.withValues(alpha: dark ? 0.16 : 0.08),
+      rest,
+    )!;
+    canvas.drawRRect(
+      r,
+      Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]).createShader(rect),
+    );
+    if (lift > 0.01) {
+      canvas.save();
+      canvas.clipRRect(r);
+      // a soft highlight across its top
+      final hl = Rect.fromLTWH(size.width * 0.12, size.height * 0.06, size.width * 0.76, size.height * 0.42);
+      canvas.drawOval(
+        hl,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [Colors.white.withValues(alpha: (dark ? 0.16 : 0.38) * lift), Colors.white.withValues(alpha: 0)],
+          ).createShader(hl),
+      );
+      // the glass thickness: light gathering just inside the edge
+      canvas.drawRRect(
+        r.deflate(2),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = Colors.white.withValues(alpha: (dark ? 0.08 : 0.22) * lift)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
+      );
+      canvas.restore();
+    }
+    // the rim: even resting; lifted it catches the light at two corners
+    final rimBright = Colors.white.withValues(alpha: dark ? 0.16 + 0.42 * lift : 0.9);
+    final rimDim = Colors.white.withValues(alpha: dark ? 0.16 * rest + 0.06 * lift : 0.9 * rest + 0.35 * lift);
+    canvas.drawRRect(
+      r.deflate(0.5),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1 + 0.4 * lift
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [rimBright, rimDim, rimDim, rimBright],
+          stops: const [0, 0.35, 0.65, 1],
+        ).createShader(rect),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LensPainter old) => old.lift != lift || old.dark != dark;
+}
+
 class _GlassNavItem extends StatelessWidget {
-  const _GlassNavItem({required this.item, required this.selected, required this.onTap, this.badge});
+  const _GlassNavItem({
+    required this.item,
+    required this.selected,
+    required this.near,
+    required this.lift,
+    required this.onTap,
+    this.badge,
+  });
 
   final _NavItem item;
   final bool selected;
+
+  /// 0..1: how much of the lens is over this tab (its colour and size follow the lens).
+  final double near;
+
+  /// 0..1: the lens lifted off the bar - the icon under it is magnified.
+  final double lift;
   final VoidCallback onTap;
   final String? badge;
 
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
-    final color = selected ? accent : p.muted;
+    final color = Color.lerp(p.muted, accent, near)!;
+    final on = near > 0.5;
     return Semantics(
       button: true,
       selected: selected,
@@ -566,21 +787,22 @@ class _GlassNavItem extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            AnimatedScale(
-              scale: selected ? 1.14 : 1,
-              duration: Motion.settle,
-              curve: Motion.spring,
+            Transform.scale(
+              scale: 1 + near * (0.14 + 0.22 * lift),
               child: Badge(
                 isLabelVisible: badge != null,
                 label: Text(badge ?? ''),
-                child: Icon(selected ? item.selected : item.icon, color: color, size: 23),
+                child: Icon(on ? item.selected : item.icon, color: color, size: 23),
               ),
             ),
             const SizedBox(height: 3),
-            Text(
-              item.short,
-              maxLines: 1,
-              style: TextStyle(fontSize: 11, height: 1.1, color: color, fontWeight: selected ? FontWeight.w800 : FontWeight.w500),
+            Transform.scale(
+              scale: 1 + near * 0.08 * lift,
+              child: Text(
+                item.short,
+                maxLines: 1,
+                style: TextStyle(fontSize: 11, height: 1.1, color: color, fontWeight: on ? FontWeight.w800 : FontWeight.w500),
+              ),
             ),
           ],
         ),
@@ -787,6 +1009,8 @@ class _IntroState extends State<_Intro> with SingleTickerProviderStateMixin {
           animation: _c,
           builder: (_, _) {
             final t = _c.value;
+            // (the system's splash before this is only the background: the logo fades in, then springs)
+            final show = Curves.easeOut.transform((t / 0.22).clamp(0.0, 1.0));
             final pop = Motion.spring.transform((t / 0.7).clamp(0.0, 1.0));
             final rise = Motion.standard.transform(((t - 0.25) / 0.75).clamp(0.0, 1.0));
             return Column(mainAxisSize: MainAxisSize.min, children: [
@@ -800,7 +1024,10 @@ class _IntroState extends State<_Intro> with SingleTickerProviderStateMixin {
                     gradient: RadialGradient(colors: [accent.withValues(alpha: 0.28 * rise), accent.withValues(alpha: 0)]),
                   ),
                 ),
-                Transform.scale(scale: 0.72 + 0.28 * pop, child: const Logo(size: 84)),
+                Opacity(
+                  opacity: show,
+                  child: Transform.scale(scale: 0.72 + 0.28 * pop, child: const Logo(size: 84)),
+                ),
               ]),
               const SizedBox(height: 6),
               Opacity(

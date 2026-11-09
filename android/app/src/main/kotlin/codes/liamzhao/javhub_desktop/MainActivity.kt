@@ -31,8 +31,10 @@ class MainActivity : FlutterActivity() {
     private var pipChannel: MethodChannel? = null
     private var mediaChannel: MethodChannel? = null
 
-    // the small window (picture in picture): allowed while a movie plays, its shape, playing or not
+    // the small window (picture in picture): allowed while a movie plays, entered on going home
+    // or only from the player's button, its shape, playing or not
     private var pipEnabled = false
+    private var pipAuto = true
     private var pipW = 16
     private var pipH = 9
     private var pipPlaying = true
@@ -51,6 +53,9 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         instance = this
+        // Android 12+: the system splash (only the background) goes at once when the app draws,
+        // the app's own intro takes over without a fade in between
+        if (Build.VERSION.SDK_INT >= 31) splashScreen.setOnExitAnimationListener { it.remove() }
         val filter = IntentFilter(ACTION_MEDIA)
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(mediaReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -122,6 +127,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "setEnabled" -> {
                         pipEnabled = call.argument<Boolean>("enabled") ?: false
+                        pipAuto = call.argument<Boolean>("auto") ?: true
                         pipW = (call.argument<Int>("w") ?: 16).coerceAtLeast(1)
                         pipH = (call.argument<Int>("h") ?: 9).coerceAtLeast(1)
                         pipPlaying = call.argument<Boolean>("playing") ?: true
@@ -176,7 +182,7 @@ class MainActivity : FlutterActivity() {
             ))
         if (Build.VERSION.SDK_INT >= 31) {
             // swiping home while a movie plays shrinks it into the small window, smoothly
-            b.setAutoEnterEnabled(pipEnabled).setSeamlessResizeEnabled(true)
+            b.setAutoEnterEnabled(pipEnabled && pipAuto).setSeamlessResizeEnabled(true)
         }
         return b.build()
     }
@@ -201,7 +207,7 @@ class MainActivity : FlutterActivity() {
     // Android 8-11 have no auto-enter: going home while a movie plays enters it here
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (pipEnabled && Build.VERSION.SDK_INT in 26..30) enterPip()
+        if (pipEnabled && pipAuto && Build.VERSION.SDK_INT in 26..30) enterPip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {

@@ -19,6 +19,7 @@ class JavPlayerSettings {
     this.ballX,
     this.ballY,
     this.autoSubtitle = false,
+    this.smallWindow = true,
   });
 
   static const prefsKey = 'javhub.player_settings.v1';
@@ -47,6 +48,10 @@ class JavPlayerSettings {
   /// starts and load the first hit.
   bool autoSubtitle;
 
+  /// Android: going home while a movie plays carries on in a small window (小窗);
+  /// off, the movie pauses.
+  bool smallWindow;
+
   /// Ball position as fractions of the player size, so it survives resizes.
   double? ballX;
   double? ballY;
@@ -68,6 +73,7 @@ class JavPlayerSettings {
     'ballX': ballX,
     'ballY': ballY,
     'autoSubtitle': autoSubtitle,
+    'smallWindow': smallWindow,
   };
 
   factory JavPlayerSettings.fromJson(Map<String, Object?> j) {
@@ -99,6 +105,7 @@ class JavPlayerSettings {
       ballX: frac(j['ballX']),
       ballY: frac(j['ballY']),
       autoSubtitle: j['autoSubtitle'] == true,
+      smallWindow: j['smallWindow'] != false,
     );
   }
 

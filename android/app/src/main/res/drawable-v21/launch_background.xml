@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Before Android 12: the app's background with its icon in the middle (the Flutter side then
-     takes the icon over and animates it into the home page) -->
+<!-- Before Android 12: only the app's background (the logo comes in with the app's own intro) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_bg" />
-    <item android:width="96dp" android:height="96dp" android:gravity="center">
-        <bitmap android:gravity="fill" android:src="@mipmap/ic_launcher" />
-    </item>
 </layer-list>

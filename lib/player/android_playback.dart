@@ -7,7 +7,8 @@ import 'package:media_kit/media_kit.dart';
 
 /// The phone's player and the system around it (Android):
 ///  - 小窗 (picture in picture): while a movie plays, going home shrinks it into a small
-///    window (play / pause, back, forward on it); [enterSmallWindow] does it from a button.
+///    window (play / pause, back, forward on it) unless [autoSmallWindow] is off;
+///    [enterSmallWindow] does it from a button either way.
 ///  - the media session: ColorOS 流体云, the control centre, the lock screen and headset
 ///    buttons show and control what is playing.
 /// The commands come back through [onCommand]; [inSmallWindow] says when the player should
@@ -28,6 +29,16 @@ class AndroidPlayback {
   final void Function(String command) onCommand;
 
   final inSmallWindow = ValueNotifier<bool>(false);
+
+  /// Going home goes small by itself (the player's 回到桌面时小窗播放).
+  bool get autoSmallWindow => _auto;
+  set autoSmallWindow(bool on) {
+    if (on == _auto) return;
+    _auto = on;
+    _pipState();
+  }
+
+  bool _auto = true;
   final _subs = <StreamSubscription<Object?>>[];
   Uint8List? _art;
   bool _artSent = false;
@@ -88,6 +99,7 @@ class AndroidPlayback {
     final w = player.state.width ?? 16, h = player.state.height ?? 9;
     unawaited(_pip.invokeMethod('setEnabled', {
       'enabled': true,
+      'auto': _auto,
       'w': w > 0 ? w : 16,
       'h': h > 0 ? h : 9,
       'playing': player.state.playing,

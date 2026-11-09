@@ -164,6 +164,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
 
   @override
   void initState() {
+    MediaKit.ensureInitialized(); // (the phone loads it only now; elsewhere it already is)
     super.initState();
     if (widget.windowed) {
       windowManager.addListener(this);
@@ -320,6 +321,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       return;
     }
     await _tools.init();
+    _android?.autoSmallWindow = _tools.settings.smallWindow;
     if (start > 0) _tools.toast('从上次的 ${fmtClock(Duration(seconds: start))} 继续${from.isEmpty || from == _device ? '' : '（$from）'}');
     _resumeDone = true;
     // the library's own subtitles: the first one ends up selected
@@ -734,7 +736,8 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
                       bottom: 76,
                       // (a phone held sideways is short: the menu scrolls instead of running off the top)
                       child: ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height - 76 - 12),
+                        // (a phone: clear of the top bar and its buttons)
+                        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height - 76 - (isDesktop ? 12 : 64)),
                         child: _PanelBox(
                         // (none of the menu's lists may take the page's scroll controller: on a
                         // phone two of them claimed it and the subtitle menu never drew)
@@ -967,6 +970,18 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
               },
             ),
           ),
+          if (_android != null) AnimatedBuilder(
+            animation: _tools,
+            builder: (_, _) => _SwitchRow(
+              icon: Icons.picture_in_picture_alt_outlined,
+              title: '回到桌面时小窗播放',
+              value: _tools.settings.smallWindow,
+              onChanged: (v) {
+                _android?.autoSmallWindow = v;
+                unawaited(_tools.setSmallWindow(v));
+              },
+            ),
+          ),
           ValueListenableBuilder<bool>(
             valueListenable: _stats,
             builder: (_, on, _) => _SwitchRow(icon: Icons.analytics_outlined, title: '统计信息', value: on, onChanged: _setStats),
@@ -1095,6 +1110,15 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
         child: Text(widget.title, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
       ),
+      if (_android != null)
+        IconButton(
+          tooltip: '小窗播放',
+          icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white),
+          onPressed: () async {
+            _panel.value = null;
+            if (!await (_android?.enterSmallWindow() ?? Future.value(false))) _tools.toast('现在没法开小窗');
+          },
+        ),
       if (widget.source.cloud)
         Container(
           margin: const EdgeInsets.only(right: 8),
@@ -1461,6 +1485,13 @@ class _TouchSeekBarState extends State<_TouchSeekBar> {
     }
     _subs.add(widget.player.stream.position.listen(upd));
     _subs.add(widget.player.stream.buffer.listen(upd));
+    // where it is now (paused, no position comes until it plays again: the bar built anew -
+    // back from the small window, the controls shown again - would sit at 0)
+    final d = widget.player.state.duration.inMilliseconds;
+    if (d > 0) {
+      _pos = widget.player.state.position.inMilliseconds / d;
+      _buf = widget.player.state.buffer.inMilliseconds / d;
+    }
   }
 
   @override
