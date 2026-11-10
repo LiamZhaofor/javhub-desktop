@@ -257,6 +257,28 @@ const jobStatusText = {
 };
 const activeJobStatus = {'queued', 'searching', 'downloading', 'organizing'};
 
+final _magnetLink = RegExp(r'^magnet:\?.*xt=urn:btih:([a-z0-9]{40}|[a-z2-7]{32})(?![a-z0-9])', caseSensitive: false);
+final _ed2kLink = RegExp(r'^ed2k://\|file\|([^|]+)\|\d+\|[0-9a-f]{32}\|', caseSensitive: false);
+
+/// 'magnet', 'ed2k' or '' for a link pasted into 添加链接 (as JavHub tells them apart).
+String linkKind(String link) {
+  final s = link.trim();
+  if (_magnetLink.hasMatch(s)) return 'magnet';
+  if (_ed2kLink.hasMatch(s)) return 'ed2k';
+  return '';
+}
+
+/// The file name a magnet (dn=) or ed2k link carries, '' if none: JavHub reads the 番号 from it.
+String linkName(String link) {
+  final s = link.trim();
+  try {
+    final e = _ed2kLink.firstMatch(s);
+    if (e != null) return Uri.decodeComponent(e[1]!).trim();
+    if (s.toLowerCase().startsWith('magnet:?')) return (Uri.splitQueryString(s.substring(8))['dn'] ?? '').trim();
+  } catch (_) {}
+  return '';
+}
+
 class Job {
   Job(this.j);
 

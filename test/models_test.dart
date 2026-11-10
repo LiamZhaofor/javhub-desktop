@@ -137,4 +137,19 @@ void main() {
     expect(b.items.last.dirs, isEmpty);
     expect(b.items.last.dir, '/media/jav');
   });
+
+  test('pasted links: magnets and ed2k told apart, with the file name they carry', () {
+    const hex = '0123456789abcdef0123456789abcdef01234567';
+    expect(linkKind(' magnet:?xt=urn:btih:$hex&dn=SSIS-001+%E4%B8%AD%E5%AD%97.mp4&tr=udp%3A%2F%2Fx '), 'magnet');
+    expect(linkName('magnet:?xt=urn:btih:$hex&dn=SSIS-001+%E4%B8%AD%E5%AD%97.mp4&tr=udp%3A%2F%2Fx'), 'SSIS-001 中字.mp4');
+    expect(linkKind('magnet:?xt=urn:btih:${'A' * 32}'), 'magnet');
+    expect(linkName('magnet:?xt=urn:btih:$hex'), '');
+    const ed2k = 'ed2k://|file|%5BHD%5DSSIS-001-C.mp4|5368709120|0123456789ABCDEF0123456789ABCDEF|/';
+    expect(linkKind(ed2k), 'ed2k');
+    expect(linkName(ed2k), '[HD]SSIS-001-C.mp4');
+    for (final bad in ['', 'magnet:?dn=x', 'https://example.com/a.torrent', 'ed2k://|server|1.2.3.4|4661|/', 'SSIS-001', 'magnet:?xt=urn:btih:abc']) {
+      expect(linkKind(bad), '', reason: bad);
+    }
+    expect(linkName('magnet:?xt=urn:btih:$hex&dn=%E4%ZZ'), ''); // a broken escape is no name, not a crash
+  });
 }

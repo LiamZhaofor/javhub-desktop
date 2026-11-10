@@ -7,6 +7,7 @@ import '../app.dart';
 import '../models.dart';
 import '../platform.dart';
 import '../widgets.dart';
+import 'dest_picker.dart';
 
 const _subPolicies = {'': '字幕默认', 'prefer': '优先中字', 'require': '只要中字', 'ignore': '不看字幕'};
 
@@ -253,7 +254,6 @@ class SearchPageState extends State<SearchPage> {
     final hint = Theme.of(context).hintColor;
     final usable = d.usable;
     final okBackends = _backends?.items.where((b) => b.ok).toList() ?? [];
-    final offBackends = _backends?.items.where((b) => !b.ok && b.name != 'qbittorrent').map((b) => b.title).toSet() ?? {};
     return ListView(
       padding: EdgeInsets.fromLTRB(pagePad(context), 0, pagePad(context), bottomGap(context)),
       children: [
@@ -324,61 +324,15 @@ class SearchPageState extends State<SearchPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('下载到', style: TextStyle(color: hint)),
-                const SizedBox(height: 6),
-                if (okBackends.isEmpty)
-                  Text('没有可用的下载方式，请在网页端「状态」页检查', style: TextStyle(color: Theme.of(context).colorScheme.error))
-                else
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final b in okBackends)
-                        ChoiceChip(
-                          selected: _dest == b.name,
-                          onSelected: (_) => setState(() {
-                            _dest = b.name;
-                            _folder = '';
-                          }),
-                          label: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(b.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                              Text(b.subtitle, style: TextStyle(fontSize: 11, color: hint)),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                Builder(builder: (context) {
-                  final b = okBackends.where((x) => x.name == _dest).firstOrNull;
-                  if (b == null) return const SizedBox.shrink();
-                  final where = b.dirs.length > 1
-                      ? DropdownButton<String>(
-                          value: _folder.isEmpty ? b.dir : _folder,
-                          isDense: true,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(10),
-                          items: [for (final d in b.dirs) DropdownMenuItem(value: d, child: Text(d))],
-                          onChanged: (v) => setState(() => _folder = v == b.dir ? '' : (v ?? '')),
-                        )
-                      : Text(b.dir.isEmpty ? '' : b.dir, style: const TextStyle(fontWeight: FontWeight.w600));
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Row(children: [
-                      Icon(Icons.folder_open_rounded, size: 18, color: hint),
-                      const SizedBox(width: 6),
-                      Text('保存到  ', style: TextStyle(color: hint)),
-                      Flexible(child: where),
-                    ]),
-                  );
-                }),
-                if (offBackends.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text('${offBackends.join('、')} 需先在网页端「网盘」页登录后才能选', style: TextStyle(color: hint, fontSize: 12)),
-                  ),
+                DestPicker(
+                  backends: _backends,
+                  dest: _dest,
+                  folder: _folder,
+                  onChanged: (d, f) => setState(() {
+                    _dest = d;
+                    _folder = f;
+                  }),
+                ),
                 const SizedBox(height: 14),
                 Wrap(
                   spacing: 10,
