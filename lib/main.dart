@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui' show FramePhase;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
@@ -23,8 +25,41 @@ const _testPlayer = String.fromEnvironment('JAVHUB_TEST_PLAYER');
 // through the 115 proxy straight away - not saved as progress, not counted as watched
 const _testItem = String.fromEnvironment('JAVHUB_TEST_ITEM');
 
+// --dart-define=JAVHUB_FRAMES=true: a build that logs how long its frames take (build / raster,
+// every 120 frames) - for checking an animation is smooth on a phone (adb logcat -s flutter)
+const _frames = bool.fromEnvironment('JAVHUB_FRAMES');
+
+void _logFrames() {
+  final build = <int>[], raster = <int>[];
+  String stats(List<int> v) {
+    v.sort();
+    int at(double q) => v[((v.length - 1) * q).round()];
+    return 'p50 ${(at(0.5) / 1000).toStringAsFixed(1)} p90 ${(at(0.9) / 1000).toStringAsFixed(1)} '
+        'max ${(v.last / 1000).toStringAsFixed(1)} ms';
+  }
+
+  SchedulerBinding.instance.addTimingsCallback((timings) {
+    for (final t in timings) {
+      build.add(t.buildDuration.inMicroseconds);
+      raster.add(t.rasterDuration.inMicroseconds);
+      if (t.rasterDuration.inMicroseconds > 8333 || t.buildDuration.inMicroseconds > 8333) {
+        // ignore: avoid_print
+        print('slow ${t.timestampInMicroseconds(FramePhase.vsyncStart) ~/ 1000} '
+            'b ${(t.buildDuration.inMicroseconds / 1000).toStringAsFixed(1)} r ${(t.rasterDuration.inMicroseconds / 1000).toStringAsFixed(1)}');
+      }
+    }
+    if (build.length < 120) return;
+    final slow = [for (var i = 0; i < build.length; i++) if (build[i] > 8333 || raster[i] > 8333) i].length;
+    // ignore: avoid_print
+    print('frames ${build.length}: build ${stats(build)}, raster ${stats(raster)}, over 8.3 ms: $slow');
+    build.clear();
+    raster.clear();
+  });
+}
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (_frames) _logFrames();
   final phone = !(Platform.isWindows || Platform.isLinux || Platform.isMacOS);
   // (the phone loads the player engine - a big native library - when a movie first opens
   // (PlayerPage), not before the app's first frame: the start shows sooner)

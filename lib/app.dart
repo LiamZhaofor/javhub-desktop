@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:developer' show Timeline;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -349,17 +351,21 @@ class _ShellState extends State<Shell> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _libraryKey.currentState?.setQuery(query));
   }
 
+  // Made once: switching tabs (or a badge changing) rebuilds the shell, and new page widgets
+  // there would build all six pages again - a 15-50 ms frame on a phone, as a tab is chosen.
+  late final List<Widget> _pages = [
+    HomePage(key: _homeKey),
+    LibraryPage(key: _libraryKey),
+    SearchPage(key: _searchKey, onJobCreated: _pollJobs),
+    const JobsPage(),
+    FavoritesPage(key: _favKey),
+    SettingsPage(onLogout: widget.onLogout),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
-    final pages = [
-      HomePage(key: _homeKey),
-      LibraryPage(key: _libraryKey),
-      SearchPage(key: _searchKey, onJobCreated: _pollJobs),
-      const JobsPage(),
-      FavoritesPage(key: _favKey),
-      SettingsPage(onLogout: widget.onLogout),
-    ];
+    final pages = _pages;
     if (isCompact(context)) {
       return Scaffold(
         // pages scroll on under the bar, which floats over them as frosted glass
@@ -466,7 +472,7 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
   // the lens to its tab, a little bounce at the end
   static final _flow = SpringDescription.withDampingRatio(mass: 1, stiffness: 300, ratio: 0.7);
   // the lens after the finger: close behind, a touch of lag (that is where its stretch comes from)
-  static final _chase = SpringDescription.withDampingRatio(mass: 1, stiffness: 1000, ratio: 0.92);
+  static final _chase = SpringDescription.withDampingRatio(mass: 1, stiffness: 1600, ratio: 0.9);
   // lifting off and settling back
   static final _swell = SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 0.6);
 
@@ -480,6 +486,14 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
   bool _dragging = false;
   int _hover = 0;
   double _tabW = 1;
+
+  // Under a finger the lens is moved once a frame, toward where the finger is ([_goal]), by
+  // [_chase]. (Not a new animation for every touch event: a phone sends those faster than it
+  // draws, and an animation started anew each time never gets past its first frame.)
+  late final Ticker _follower = createTicker(_tick);
+  Duration _lastTick = Duration.zero;
+  double _goal = 0;
+  double _vel = 0; // the lens, tabs a second
 
   int get _n => _nav.length;
 
@@ -498,6 +512,7 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
 
   @override
   void dispose() {
+    _follower.dispose();
     _pos.dispose();
     _lift.dispose();
     super.dispose();
@@ -522,14 +537,36 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
     return t;
   }
 
+  // --dart-define=JAVHUB_FRAMES=true: a drag logs its touch events, frames and ticks (adb logcat -s flutter)
+  static const _trace = bool.fromEnvironment('JAVHUB_FRAMES');
+  final _clock = Stopwatch()..start();
+  final _log = <String>[];
+
   void _follow(double dx) {
-    final t = _tabAt(dx);
-    unawaited(_pos.animateWith(SpringSimulation(_chase, _pos.value, t, _pos.velocity)));
-    final h = t.round().clamp(0, _n - 1);
+    _goal = _tabAt(dx);
+    if (_trace) _log.add('e ${_clock.elapsedMilliseconds} ${_goal.toStringAsFixed(2)}');
+    final h = _goal.round().clamp(0, _n - 1);
     if (h != _hover) {
       _hover = h;
-      unawaited(HapticFeedback.selectionClick());
+      if (_trace) {
+        final t0 = _clock.elapsedMilliseconds;
+        _log.add('h $t0');
+        unawaited(HapticFeedback.selectionClick().then((_) => _log.add('hd $t0 ${_clock.elapsedMilliseconds - t0}')));
+      } else {
+        unawaited(HapticFeedback.selectionClick());
+      }
     }
+  }
+
+  void _tick(Duration now) {
+    final dt = ((now - _lastTick).inMicroseconds / 1e6).clamp(0.0, 1 / 30);
+    _lastTick = now;
+    if (dt <= 0) return;
+    // one frame of the spring, from where the lens is and how fast it goes
+    final s = SpringSimulation(_chase, _pos.value, _goal, _vel);
+    _vel = s.dx(dt);
+    _pos.value = s.x(dt);
+    if (_trace) _log.add('f ${_clock.elapsedMilliseconds} ${_pos.value.toStringAsFixed(2)}');
   }
 
   // a finger on the bar: the lens swells a little (a tap carries on to the tab, a slide lifts it)
@@ -540,19 +577,36 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
   }
 
   void _start(DragStartDetails d) {
+    // ignore: avoid_print
+    if (_trace) print('mark start ${Timeline.now ~/ 1000}');
     _dragging = true;
+    _vel = _pos.velocity; // (it may be flowing still)
+    _pos.stop();
     _hover = _pos.value.round().clamp(0, _n - 1);
     _liftTo(1);
     _follow(d.localPosition.dx - _inset);
+    _lastTick = Duration.zero;
+    if (!_follower.isActive) unawaited(_follower.start());
   }
 
   void _end(DragEndDetails d) {
+    // ignore: avoid_print
+    if (_trace) print('mark end ${Timeline.now ~/ 1000}');
     _dragging = false;
-    final v = _pos.velocity;
-    // a flick carries on a bit
-    final to = (_pos.value + v * 0.06).round().clamp(0, _n - 1);
-    _flowTo(to, velocity: v);
+    _follower.stop();
+    // the tab under the finger (not under the lens, a little behind it); a flick carries on a bit
+    final flick = d.velocity.pixelsPerSecond.dx / _tabW;
+    final to = (_goal + flick * 0.05).round().clamp(0, _n - 1);
+    _flowTo(to, velocity: _vel);
     if (to != widget.selected) widget.onSelect(to);
+    if (_trace) {
+      final all = _log.join(';');
+      _log.clear();
+      for (var i = 0; i < all.length; i += 900) {
+        // ignore: avoid_print
+        print('drag ${all.substring(i, (i + 900).clamp(0, all.length))}');
+      }
+    }
   }
 
   @override
@@ -612,7 +666,7 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
                 builder: (context, bar) {
                   final pos = _pos.value;
                   final lift = _lift.value.clamp(-0.3, 1.4);
-                  final speed = _pos.velocity.abs(); // tabs a second
+                  final speed = (_dragging ? _vel : _pos.velocity).abs(); // tabs a second
                   // pulled past an end: the bar gives a little that way
                   final over = pos < 0 ? pos : (pos > _n - 1 ? pos - (_n - 1) : 0.0);
                   // the lens: lifted it swells past the bar edges; moving fast it stretches
@@ -626,7 +680,8 @@ class _GlassNavBarState extends State<_GlassNavBar> with TickerProviderStateMixi
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        Positioned.fill(child: bar!),
+                        // (its own layer: the lens moving over it does not paint it again)
+                        Positioned.fill(child: RepaintBoundary(child: bar!)),
                         Positioned(
                           left: cx - lw / 2,
                           top: _height / 2 - lh / 2,
@@ -683,14 +738,27 @@ class _LensPainter extends CustomPainter {
     final rect = Offset.zero & size;
     final r = RRect.fromRectAndRadius(rect, Radius.circular(size.height / 2));
     final rest = 1 - lift;
-    // the shadow it casts once lifted
+    // the shadow it casts once lifted (a soft gradient, not a blur: drawn every frame of a drag)
     if (lift > 0.01) {
-      canvas.drawRRect(
-        r.shift(Offset(0, 5 * lift)),
-        Paint()
-          ..color = Colors.black.withValues(alpha: (dark ? 0.38 : 0.16) * lift)
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10 * lift),
+      final shadow = Rect.fromCenter(
+        center: Offset(size.width / 2, size.height / 2 + 6 * lift),
+        width: size.width + 26 * lift,
+        height: size.height + 26 * lift,
       );
+      final a = (dark ? 0.42 : 0.2) * lift;
+      canvas.save();
+      canvas.translate(shadow.center.dx, shadow.center.dy);
+      canvas.scale(1, shadow.height / shadow.width);
+      canvas.drawCircle(
+        Offset.zero,
+        shadow.width / 2,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [Colors.black.withValues(alpha: a), Colors.black.withValues(alpha: a * 0.55), Colors.black.withValues(alpha: 0)],
+            stops: const [0, 0.72, 1],
+          ).createShader(Rect.fromCircle(center: Offset.zero, radius: shadow.width / 2)),
+      );
+      canvas.restore();
     }
     // the glass: the accent tint resting, clear (a little white) lifted
     final top = Color.lerp(
@@ -708,8 +776,6 @@ class _LensPainter extends CustomPainter {
       Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]).createShader(rect),
     );
     if (lift > 0.01) {
-      canvas.save();
-      canvas.clipRRect(r);
       // a soft highlight across its top
       final hl = Rect.fromLTWH(size.width * 0.12, size.height * 0.06, size.width * 0.76, size.height * 0.42);
       canvas.drawOval(
@@ -719,16 +785,22 @@ class _LensPainter extends CustomPainter {
             colors: [Colors.white.withValues(alpha: (dark ? 0.16 : 0.38) * lift), Colors.white.withValues(alpha: 0)],
           ).createShader(hl),
       );
-      // the glass thickness: light gathering just inside the edge
+      // the glass thickness: light gathering just inside the edge (two faint lines, not a blur)
+      final glow = (dark ? 0.07 : 0.2) * lift;
       canvas.drawRRect(
         r.deflate(2),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..color = Colors.white.withValues(alpha: (dark ? 0.08 : 0.22) * lift)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
+          ..strokeWidth = 2
+          ..color = Colors.white.withValues(alpha: glow),
       );
-      canvas.restore();
+      canvas.drawRRect(
+        r.deflate(3.5),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = Colors.white.withValues(alpha: glow * 0.45),
+      );
     }
     // the rim: even resting; lifted it catches the light at two corners
     final rimBright = Colors.white.withValues(alpha: dark ? 0.16 + 0.42 * lift : 0.9);
@@ -961,14 +1033,27 @@ class _FadeIndexedStackState extends State<FadeIndexedStack> with SingleTickerPr
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _a,
-    builder: (_, child) => Opacity(
-      opacity: _a.value,
-      child: Transform.scale(scale: 0.96 + 0.04 * _a.value, child: child),
-    ),
-    child: IndexedStack(index: widget.index, children: widget.children),
-  );
+  Widget build(BuildContext context) {
+    final bg = Palette.of(context).bg;
+    // The page fades in over the app's background. Done as that background laid over the page
+    // and fading away - the same picture, but not the whole page (posters and all) drawn into
+    // a layer of its own every frame; and not zoomed either (every poster drawn again, blurred
+    // backdrops and all, each frame): both made a switch stutter.
+    return AnimatedBuilder(
+      animation: _a,
+      builder: (_, child) {
+        final t = _a.value;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            child!,
+            IgnorePointer(child: t < 1 ? ColoredBox(color: bg.withValues(alpha: 1 - t)) : const SizedBox.shrink()),
+          ],
+        );
+      },
+      child: IndexedStack(index: widget.index, children: widget.children),
+    );
+  }
 }
 
 /// The phone's lists bounce at their ends (as ColorOS / iOS lists do) instead of stretching.
