@@ -13,6 +13,24 @@ import 'stream_proxy.dart' show trace;
 
 const _subtitleExts = ['srt', 'ass', 'ssa', 'vtt'];
 
+/// The stats panel's buffer line, from mpv's `demuxer-cache-duration`,
+/// `demuxer-cache-state` and `cache-speed`. mpv's read speed is the network's
+/// only while its cache fills: once [aheadBytes] are buffered it reads just what
+/// playback uses (the movie's bitrate), so a full cache says so instead of
+/// passing for a slow download.
+String bufferLine({required String seconds, required String cacheState, required String speed, required int aheadBytes}) {
+  final secs = double.tryParse(seconds)?.toStringAsFixed(1) ?? '-';
+  final mbs = ((double.tryParse(speed) ?? 0) / 1024 / 1024).toStringAsFixed(2);
+  Object? state;
+  try {
+    state = jsonDecode(cacheState);
+  } catch (_) {}
+  if (state is Map && state['eof-cached'] == true) return '缓冲    $secs 秒（已到片尾）';
+  final ahead = state is Map ? state['fw-bytes'] : null;
+  if (ahead is num && ahead >= aheadBytes * 0.95) return '缓冲    $secs 秒（已满）   按播放读取 $mbs MB/s';
+  return '缓冲    $secs 秒   下载 $mbs MB/s';
+}
+
 /// One hit of the Xunlei (迅雷) subtitle search.
 class OnlineSubtitle {
   const OnlineSubtitle({required this.name, required this.url, required this.ext, this.extra = '', this.duration});

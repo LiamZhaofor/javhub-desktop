@@ -140,6 +140,9 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
   final _hwdec = ValueNotifier<bool>(true);
   final _stats = ValueNotifier<bool>(false);
   final _statsText = ValueNotifier<String>('');
+
+  /// How far ahead mpv buffers (its demuxer cache).
+  static const _aheadBytes = 256 << 20;
   Timer? _statsTimer;
 
   // seek-bar previews
@@ -258,7 +261,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
 
   Future<void> _start() async {
     await _tools.setProperty('network-timeout', '20');
-    await _tools.setProperty('demuxer-max-bytes', '256MiB');
+    await _tools.setProperty('demuxer-max-bytes', '$_aheadBytes');
     await _tools.setProperty('demuxer-max-back-bytes', '64MiB');
     // after a seek (or a stall) play on once 0.6 s is buffered, not mpv's 1 s
     await _tools.setProperty('cache-pause-wait', '0.6');
@@ -492,18 +495,18 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       final values = await Future.wait([
         g('video-codec'), g('hwdec-current'), g('estimated-vf-fps'), g('video-bitrate'),
         g('audio-codec-name'), g('demuxer-cache-duration'), g('frame-drop-count'), g('cache-speed'),
+        g('demuxer-cache-state'),
       ]);
       final s = _player.state;
       String num(String v, [int digits = 1]) => double.tryParse(v)?.toStringAsFixed(digits) ?? '-';
       final kbps = (double.tryParse(values[3]) ?? 0) / 1000;
-      final speed = (double.tryParse(values[7]) ?? 0) / 1024 / 1024;
       _statsText.value = [
         '分辨率  ${s.width ?? '-'} × ${s.height ?? '-'}   ${num(values[2], 2)} fps',
         '视频    ${values[0].isEmpty ? '-' : values[0]}',
         '解码    ${values[1].isEmpty || values[1] == 'no' ? '软件' : '硬件 (${values[1]})'}',
         '码率    ${kbps > 0 ? '${kbps.toStringAsFixed(0)} kbps' : '-'}',
         '音频    ${values[4].isEmpty ? '-' : values[4]}',
-        '缓冲    ${num(values[5])} 秒   下载 ${speed.toStringAsFixed(2)} MB/s',
+        bufferLine(seconds: values[5], cacheState: values[8], speed: values[7], aheadBytes: _aheadBytes),
         '丢帧    ${values[6].isEmpty ? '0' : values[6]}',
         '来源    ${widget.source.cloud ? '115 直连（本地代理）' : 'NAS'}',
       ].join('\n');
