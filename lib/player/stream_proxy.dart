@@ -680,6 +680,7 @@ class JavStreamProxy {
         try {
           final asked = watch.elapsedMilliseconds;
           final used = s.cdn;
+          final gen = s.linkGen;
           final resp = await _cdn.get(used, from, end, userAgent, onConn: (cancel, warm, rate) {
             t.warm = warm;
             t.connRate = rate;
@@ -756,11 +757,14 @@ class JavStreamProxy {
           if ((resp.status == HttpStatus.forbidden || resp.status == HttpStatus.notFound || resp.status == HttpStatus.gone) &&
               resolves < 2) {
             // The signed link expired: ask the gateway for a fresh one (unless
-            // another request of this file just did).
-            if (s.cdn != used) continue;
+            // another request of this file got one since this one went out).
+            if (s.linkGen != gen) continue;
             resolves++;
             final link = await _link(s.key, s.origin, s.headers, fresh: true);
-            if (link != null) s.cdn = link.cdn;
+            if (link != null) {
+              s.cdn = link.cdn;
+              s.linkGen++;
+            }
             continue;
           }
           if (resp.status == HttpStatus.requestedRangeNotSatisfiable) {
@@ -1203,6 +1207,10 @@ class _Session {
   final Map<String, String> headers;
   final String key;
   Uri cdn;
+
+  /// Counts fresh links [cdn] got (a request refused on an older one just goes
+  /// again, on this one).
+  int linkGen = 0;
   int? size;
   String? contentType;
   DateTime? prepared;
