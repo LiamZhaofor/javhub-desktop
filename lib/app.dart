@@ -914,19 +914,16 @@ class _SideButtonState extends State<_SideButton> {
             duration: const Duration(milliseconds: 140),
             height: 42,
             padding: const EdgeInsets.symmetric(horizontal: 12),
+            // the chosen page: a raised segment (the web's pill nav), the icon in the accent
             decoration: BoxDecoration(
-              color: on ? accent.withValues(alpha: 0.13) : (_hover ? p.raised : Colors.transparent),
+              color: on ? p.segOn : (_hover ? p.fill : Colors.transparent),
               borderRadius: BorderRadius.circular(10),
+              boxShadow: on
+                  ? const [BoxShadow(color: Color(0x1F000000), blurRadius: 3, offset: Offset(0, 1))]
+                  : const [BoxShadow(color: Color(0x00000000), blurRadius: 3, offset: Offset(0, 1))],
             ),
             child: Row(
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  width: 3,
-                  height: on ? 18 : 0,
-                  margin: const EdgeInsets.only(right: 10),
-                  decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(2)),
-                ),
                 Icon(on ? widget.item.selected : widget.item.icon, size: 20, color: on ? accent : p.muted),
                 const SizedBox(width: 12),
                 Expanded(

@@ -170,7 +170,8 @@ class LibraryPageState extends State<LibraryPage> {
           onPressed: _loading ? null : () => load(rescan: true),
           icon: const Icon(Icons.refresh_rounded, size: 20),
           style: IconButton.styleFrom(
-            side: BorderSide(color: p.line),
+            side: BorderSide.none,
+            backgroundColor: p.fill,
             fixedSize: const Size(42, 42),
           ),
         ),
@@ -183,19 +184,21 @@ class LibraryPageState extends State<LibraryPage> {
         runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          // the categories: a pill group, the chosen one inverted (the web's .seg)
           for (final c in ['', ..._categories])
             ChoiceChip(
               showCheckmark: false,
+              selectedColor: p.text,
               label: Text.rich(
                 TextSpan(
                   children: [
                     TextSpan(
                       text: c.isEmpty ? '全部' : c,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: TextStyle(fontWeight: FontWeight.w600, color: _cat == c ? p.bg : p.text),
                     ),
                     TextSpan(
                       text: '  ${c.isEmpty ? base.length : base.where((it) => it.category == c).length}',
-                      style: TextStyle(color: p.muted, fontSize: 12),
+                      style: TextStyle(color: _cat == c ? p.bg.withValues(alpha: 0.6) : p.muted, fontSize: 12),
                     ),
                   ],
                 ),
@@ -203,7 +206,7 @@ class LibraryPageState extends State<LibraryPage> {
               selected: _cat == c,
               onSelected: (_) => setState(() => _cat = c),
             ),
-          Container(width: 1, height: 22, color: p.line, margin: const EdgeInsets.symmetric(horizontal: 6)),
+          Container(width: 1, height: 22, color: p.fill2, margin: const EdgeInsets.symmetric(horizontal: 6)),
           SelectBox<String>(
             value: _where,
             icon: Icons.place_outlined,

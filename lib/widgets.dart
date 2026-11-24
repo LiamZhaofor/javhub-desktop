@@ -323,21 +323,20 @@ class _PosterTileState extends State<PosterTile> {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 260),
                   curve: Curves.easeOutCubic,
-                  transform: Matrix4.translationValues(0, _hover ? -5 : 0, 0),
+                  // frameless: the picture is the card; it rises on a deeper (neutral) shadow
+                  transform: Matrix4.translationValues(0, _hover ? -4 : 0, 0),
                   decoration: BoxDecoration(
+                    color: p.raised,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _hover ? accent.withValues(alpha: 0.8) : p.line, width: _hover ? 1.5 : 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (_hover ? accent : Colors.black).withValues(alpha: _hover ? 0.28 : 0.12),
-                        blurRadius: _hover ? 22 : 6,
-                        spreadRadius: _hover ? -2 : 0,
-                        offset: Offset(0, _hover ? 10 : 2),
-                      ),
-                    ],
+                    boxShadow: _hover ? p.liftShadow : p.cardShadow,
+                  ),
+                  // a hairline over the edge, so a pale poster still has one
+                  foregroundDecoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: p.hair),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(12),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -381,7 +380,7 @@ class _PosterTileState extends State<PosterTile> {
               const SizedBox(height: 8),
               AnimatedDefaultTextStyle(
                 duration: const Duration(milliseconds: 200),
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: p.text),
                 child: Text(widget.code, maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
               const SizedBox(height: 2),
@@ -461,11 +460,10 @@ class SelectBox<T> extends StatelessWidget {
     final p = Palette.of(context);
     return Container(
       height: 34,
-      padding: const EdgeInsets.only(left: 10, right: 4),
+      padding: const EdgeInsets.only(left: 12, right: 4),
       decoration: BoxDecoration(
-        color: p.surface,
-        border: Border.all(color: p.line),
-        borderRadius: BorderRadius.circular(8),
+        color: p.fill,
+        borderRadius: BorderRadius.circular(999),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<T>(

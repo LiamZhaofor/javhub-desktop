@@ -548,14 +548,21 @@ class _StillThumbState extends State<_StillThumb> {
     child: GestureDetector(
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
         width: widget.width,
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
         decoration: BoxDecoration(
+          color: Palette.of(context).raised,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _hover ? accent : Palette.of(context).line, width: _hover ? 1.5 : 1),
+          boxShadow: _hover ? Palette.of(context).liftShadow : Palette.of(context).cardShadow,
+        ),
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Palette.of(context).hair),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(10),
           child: AspectRatio(aspectRatio: 3 / 2, child: NetImage(widget.url, decodeWidth: 360)),
         ),
       ),

@@ -122,7 +122,7 @@ class HomePageState extends State<HomePage> {
                     tooltip: '刷新',
                     onPressed: _loading ? null : reload,
                     icon: const Icon(Icons.refresh_rounded, size: 20),
-                    style: IconButton.styleFrom(side: BorderSide(color: p.line)),
+                    style: IconButton.styleFrom(side: BorderSide.none, backgroundColor: p.fill),
                   ),
                 ],
               ),
@@ -259,17 +259,30 @@ class _RowState extends State<_Row> {
               children: [
                 Text(
                   widget.title,
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: p.text),
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: p.text, letterSpacing: -0.3),
                 ),
                 if (widget.subtitle != null && !isCompact(context)) ...[
                   const SizedBox(width: 10),
                   Text(widget.subtitle!, style: TextStyle(color: p.muted, fontSize: 12.5)),
                 ],
                 const Spacer(),
-                // a phone swipes the row; the arrows are for a mouse
+                // a phone swipes the row; the arrows are for a mouse: two small round grey buttons
                 if (isDesktop) ...[
-                  IconButton(onPressed: _start ? null : () => _page(-1), icon: const Icon(Icons.chevron_left_rounded)),
-                  IconButton(onPressed: _end ? null : () => _page(1), icon: const Icon(Icons.chevron_right_rounded)),
+                  for (final (dir, icon) in [(-1, Icons.chevron_left_rounded), (1, Icons.chevron_right_rounded)]) ...[
+                    const SizedBox(width: 6),
+                    IconButton(
+                      onPressed: (dir < 0 ? _start : _end) ? null : () => _page(dir),
+                      icon: Icon(icon, size: 20),
+                      style: IconButton.styleFrom(
+                        backgroundColor: p.fill,
+                        disabledBackgroundColor: p.fill.withValues(alpha: 0.4),
+                        fixedSize: const Size(32, 32),
+                        minimumSize: const Size(32, 32),
+                        padding: EdgeInsets.zero,
+                        shape: const CircleBorder(),
+                      ),
+                    ),
+                  ],
                 ],
               ],
             ),
@@ -330,21 +343,20 @@ class _WideCardState extends State<_WideCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                transform: Matrix4.translationValues(0, _hover ? -4 : 0, 0),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _hover ? accent.withValues(alpha: 0.8) : p.line, width: _hover ? 1.5 : 1),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: _hover ? 0.3 : 0.1),
-                      blurRadius: _hover ? 16 : 6,
-                      offset: Offset(0, _hover ? 6 : 2),
-                    ),
-                  ],
+                  color: p.raised,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: _hover ? p.liftShadow : p.cardShadow,
+                ),
+                foregroundDecoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: p.hair),
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: BorderRadius.circular(14),
                   child: AspectRatio(
                     aspectRatio: 16 / 9,
                     child: Stack(
@@ -383,7 +395,7 @@ class _WideCardState extends State<_WideCard> {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: _hover ? accent : p.text),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: p.text),
               ),
               const SizedBox(height: 2),
               Text(
