@@ -106,13 +106,18 @@ Future<void> main(List<String> args) async {
     return;
   }
   await windowManager.ensureInitialized();
+  // the window's colour before the first frame: the page's own, light or dark as chosen
+  await ThemeController.instance.restore();
+  final mode = ThemeController.instance.value;
+  final dark = mode == ThemeMode.dark ||
+      (mode == ThemeMode.system && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
   await windowManager.waitUntilReadyToShow(
     WindowOptions(
       title: 'JavHub',
       size: _phone ? const Size(412, 900) : const Size(1440, 900),
       minimumSize: _phone ? const Size(360, 640) : const Size(960, 640),
       center: true,
-      backgroundColor: const Color(0xFF0E1014),
+      backgroundColor: (dark ? Palette.dark : Palette.light).bg,
       // Windows: the app draws its own title bar (window_frame.dart)
       titleBarStyle: customTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
       windowButtonVisibility: !customTitleBar,

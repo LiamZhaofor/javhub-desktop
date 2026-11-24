@@ -11,15 +11,19 @@ import 'detail.dart';
 
 const _categories = ['有码', '无码', '素人', 'FC2'];
 const _sorts = {'mtime': '最近入库', 'date': '发行日期', 'code': '番号', 'actor': '演员', 'rating': '我的评分'};
-const _marks = {'': '标记不限', 'fav': '♥ 收藏', 'unwatched': '未看', 'watched': '已看', 'rated': '已评分'};
+const _marks = {'': '标记不限', 'fav': '♥ 收藏', 'unwatched': '未看', 'watched': '已看', 'rated': '已评分', 'unscraped': '未刮削'};
 
 bool _markOk(LibraryItem it, String m) => switch (m) {
   'fav' => it.fav,
   'unwatched' => !it.watched,
   'watched' => it.watched,
   'rated' => it.rating > 0,
+  'unscraped' => it.unscraped,
   _ => true,
 };
+
+/// The web's --warn: the "N 部未刮削" link.
+const _warn = Color(0xFFC27C0E);
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
@@ -138,6 +142,7 @@ class LibraryPageState extends State<LibraryPage> {
     final base = _base();
     final view = _view(base);
     final filtered = _q.text.isNotEmpty || _where.isNotEmpty || _sub.isNotEmpty || _mark.isNotEmpty || _cat.isNotEmpty;
+    final unscraped = _all.where((it) => it.unscraped).length;
     final header = PageHeader(
       title: '片库',
       subtitle: filtered ? '${view.length} / ${_all.length} 部' : '${_all.length} 部',
@@ -221,6 +226,21 @@ class LibraryPageState extends State<LibraryPage> {
           ),
           SelectBox<String>(value: _mark, icon: Icons.bookmark_border_rounded, options: _marks, onChanged: (v) => _set(() => _mark = v)),
           SelectBox<String>(value: _sort, icon: Icons.sort_rounded, options: _sorts, onChanged: (v) => _set(() => _sort = v)),
+          // movies without a cover or data: one click shows just them (as the web's link)
+          if (unscraped > 0 && _mark != 'unscraped')
+            Tooltip(
+              message: '封面或资料没刮到的影片：详情页可重新刮削或改番号',
+              child: TextButton.icon(
+                onPressed: () => _set(() {
+                  _q.clear();
+                  _where = _sub = _cat = '';
+                  _mark = 'unscraped';
+                }),
+                style: TextButton.styleFrom(foregroundColor: _warn),
+                icon: const Icon(Icons.image_not_supported_outlined, size: 16),
+                label: Text('$unscraped 部未刮削'),
+              ),
+            ),
           if (filtered)
             TextButton.icon(
               onPressed: () => _set(() {

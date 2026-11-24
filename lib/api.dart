@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:path_provider/path_provider.dart';
@@ -148,8 +149,25 @@ class JavHubApi {
     _token = null;
     _lanBase = null;
     _lanTimer?.cancel();
+    netDownSince.value = null;
     final p = await SharedPreferences.getInstance();
     await p.remove(_prefToken);
+  }
+
+  /// 外网不通: JavHub can reach none of the movie sites, so scraping waits (from /api/me).
+  /// null while it can; else since when (epoch seconds, 0 when unknown).
+  final netDownSince = ValueNotifier<double?>(null);
+
+  void _readNet(Object? n) {
+    netDownSince.value = n is Map && n['ok'] == false ? ((n['since'] as num?)?.toDouble() ?? 0) : null;
+  }
+
+  /// Asks again whether JavHub can reach the sites (the shell, every 2 minutes).
+  Future<void> refreshNet() async {
+    if (_token == null) return;
+    try {
+      _readNet((await get('/api/me'))['net']);
+    } catch (_) {}
   }
 
   /// Checks the stored session; false when it has to log in again.
@@ -157,6 +175,7 @@ class JavHubApi {
     if (_token == null) return false;
     try {
       final d = await get('/api/me');
+      _readNet(d['net']);
       lan = d['lan'] == true;
       _lanUrl = '${d['lan_url'] ?? ''}'.replaceAll(RegExp(r'/+$'), '');
       if (d['user'] != null && _lanUrl.isNotEmpty && _lanBase == null) {

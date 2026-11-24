@@ -294,6 +294,7 @@ class _ShellState extends State<Shell> {
   Timer? _jobsTimer;
   int _newReleases = 0;
   Timer? _releasesTimer;
+  Timer? _netTimer;
 
   /// 收藏's badge: the followed actresses' new movies not seen yet.
   static void setNewReleases(int n) {
@@ -317,6 +318,8 @@ class _ShellState extends State<Shell> {
     unawaited(_pollJobs());
     unawaited(_pollReleases());
     _releasesTimer = Timer.periodic(const Duration(minutes: 30), (_) => unawaited(_pollReleases()));
+    // 外网不通 comes and goes: ask again now and then (as the web page does)
+    _netTimer = Timer.periodic(const Duration(minutes: 2), (_) => unawaited(App.api.refreshNet()));
     // a newer build on JavHub? asked once a start, a little after it
     Future<void>.delayed(const Duration(seconds: 4), () {
       if (mounted) unawaited(checkForUpdate(context));
@@ -328,6 +331,7 @@ class _ShellState extends State<Shell> {
     if (_current == this) _current = null;
     _jobsTimer?.cancel();
     _releasesTimer?.cancel();
+    _netTimer?.cancel();
     super.dispose();
   }
 
@@ -370,7 +374,7 @@ class _ShellState extends State<Shell> {
       return Scaffold(
         // pages scroll on under the bar, which floats over them as frosted glass
         extendBody: true,
-        body: FadeIndexedStack(index: _tab, children: pages),
+        body: WithNetBanner(compact: true, child: FadeIndexedStack(index: _tab, children: pages)),
         bottomNavigationBar: _GlassNavBar(
           selected: _tab,
           badges: {if (_activeJobs > 0) 3: '$_activeJobs', if (_newReleases > 0) 4: '$_newReleases'},
@@ -437,13 +441,66 @@ class _ShellState extends State<Shell> {
               ),
             ),
             Expanded(
-              child: FadeIndexedStack(index: _tab, children: pages),
+              child: WithNetBanner(compact: false, child: FadeIndexedStack(index: _tab, children: pages)),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+/// The pages, under a red banner while JavHub can reach none of the movie sites (the web's
+/// #netBanner). The pages stay the same widget either way: none loses its state or scroll.
+class WithNetBanner extends StatelessWidget {
+  const WithNetBanner({super.key, required this.compact, required this.child});
+
+  final bool compact;
+  final Widget child;
+
+  static String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<double?>(
+    valueListenable: App.api.netDownSince,
+    child: child,
+    builder: (context, since, pages) {
+      final down = since != null;
+      Widget banner = const SizedBox.shrink();
+      if (since != null) {
+        final bad = Theme.of(context).colorScheme.error;
+        final t = DateTime.fromMillisecondsSinceEpoch((since * 1000).round());
+        final when = since > 0 ? '（自 ${_two(t.month)}-${_two(t.day)} ${_two(t.hour)}:${_two(t.minute)} 起）' : '';
+        banner = Container(
+          margin: compact ? const EdgeInsets.fromLTRB(12, 6, 12, 2) : EdgeInsets.fromLTRB(pagePad(context), 16, pagePad(context), 0),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: bad.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: bad.withValues(alpha: 0.28)),
+          ),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(text: '外网不通', style: TextStyle(fontWeight: FontWeight.w700)),
+                TextSpan(text: '$when：刮削暂停，不消耗重试次数，恢复后自动继续；搜索和演员新片检查也会失败。'),
+              ],
+            ),
+            style: TextStyle(color: bad, fontSize: 13, height: 1.5),
+          ),
+        );
+        // a phone: the banner takes the status bar's room, the page below starts under it
+        if (compact) banner = SafeArea(bottom: false, child: banner);
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          banner,
+          Expanded(child: MediaQuery.removePadding(context: context, removeTop: compact && down, child: pages!)),
+        ],
+      );
+    },
+  );
 }
 
 /// The phone's navigation, in liquid glass: a rounded bar of frosted glass floating above

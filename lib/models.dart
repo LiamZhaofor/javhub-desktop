@@ -29,6 +29,7 @@ class LibraryItem {
     this.cloud = false,
     this.poster = false,
     this.posterVersion = 0,
+    this.unscraped = false,
     this.fanart = false,
     this.videos = const [],
     this.subs = const [],
@@ -61,6 +62,7 @@ class LibraryItem {
     cloud: _b(j['cloud']),
     poster: _b(j['poster']),
     posterVersion: _i(j['pv']),
+    unscraped: j['scraped'] == false,
     fanart: _b(j['fanart']),
     videos: _ls(j['videos']),
     subs: _ls(j['subs']),
@@ -92,6 +94,9 @@ class LibraryItem {
   final bool cloud;
   final bool poster;
   final int posterVersion;
+
+  /// 未刮削: no cover, or nothing known beyond the code (a server too old to say: false).
+  final bool unscraped;
   final bool fanart;
   final List<String> videos;
   final List<String> subs;

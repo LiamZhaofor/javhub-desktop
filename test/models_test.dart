@@ -25,6 +25,15 @@ void main() {
     expect(items[0].matches('zzz'), isFalse);
   });
 
+  test('未刮削 only when the server says so', () {
+    final items = parseLibrary([
+      {'id': 'a', 'code': 'A-001', 'folder': 'A-001', 'scraped': false},
+      {'id': 'b', 'code': 'B-001', 'folder': 'B-001', 'scraped': true},
+      {'id': 'c', 'code': 'C-001', 'folder': 'C-001'}, // an older server
+    ]);
+    expect([for (final it in items) it.unscraped], [true, false, false]);
+  });
+
   test('the title under a tile drops the code, falls back to the actresses', () {
     expect(shortenTitle('[SSIS-001] 标题', 'SSIS-001', const []), '标题');
     expect(shortenTitle('SSIS-001', 'SSIS-001', const ['甲', '乙', '丙']), '甲 乙');
