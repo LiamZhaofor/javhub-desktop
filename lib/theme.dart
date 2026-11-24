@@ -211,6 +211,8 @@ ThemeData buildTheme(Brightness brightness) {
     // tags and filters: grey pills, no outline (a chosen one takes the accent's tint)
     chipTheme: ChipThemeData(
       backgroundColor: p.fill,
+      // (an unavailable one keeps its pill, a little fainter: without an outline it would be bare text)
+      disabledColor: p.fill.withValues(alpha: p.fill.a * 0.6),
       selectedColor: accent.withValues(alpha: brightness == Brightness.dark ? 0.22 : 0.12),
       side: BorderSide.none,
       shape: const StadiumBorder(),
