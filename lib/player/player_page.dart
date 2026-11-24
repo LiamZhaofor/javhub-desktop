@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -62,6 +63,12 @@ enum _Panel { subtitles, speed, settings }
 
 const _rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 
+// --dart-define=JAVHUB_TEST_ACCEL=true (with JAVHUB_TEST_PLAYER and JAVHUB_TRACE): a test build
+// that holds the accelerate key down a few times, traces mpv's dropped frames, A/V sync and
+// cache every 50 ms, and quits; JAVHUB_CYCLES / JAVHUB_FAST_S (environment) set how often and
+// how long, JAVHUB_AB another audio-buffer
+const _testAccel = bool.fromEnvironment('JAVHUB_TEST_ACCEL');
+
 /// The steps 快进 / 快退 can take.
 const seekSteps = [5.0, 10.0, 15.0, 30.0, 60.0];
 
@@ -123,6 +130,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       // draws them (libass there has no CJK font: Chinese would be boxes)
       libass: isDesktop,
       bufferSize: 64 << 20,
+      logLevel: _testAccel ? MPVLogLevel.v : MPVLogLevel.error,
     ),
   );
   late final VideoController _video = VideoController(_player);
@@ -259,6 +267,59 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     }
   }
 
+  static String _cacheBytes(String state) {
+    try {
+      final j = jsonDecode(state) as Map;
+      return '${(j['fw-bytes'] as num) ~/ 1048576}/${(j['total-bytes'] as num) ~/ 1048576}MB';
+    } catch (_) {
+      return '-';
+    }
+  }
+
+  Future<void> _accelTest() async {
+    _subs.add(_player.stream.log.listen((l) {
+      if (const ['ao', 'af', 'demux', 'stream', 'ffmpeg'].any(l.prefix.startsWith) || l.text.contains('speed') || l.text.contains('seek') || l.text.contains('underrun')) {
+        trace('mpv [${l.prefix}] ${l.text.trim()}');
+      }
+    }));
+    var phase = 'start';
+    var stop = false;
+    unawaited(() async {
+      while (!stop && mounted) {
+        final v = await Future.wait([
+          for (final p in ['frame-drop-count', 'decoder-frame-drop-count', 'avsync', 'time-pos', 'speed', 'current-ao', 'audio-pts', 'demuxer-cache-state', 'cache-speed'])
+            _tools.getProperty(p),
+        ]);
+        trace('accel $phase drop=${v[0]} dec=${v[1]} avsync=${v[2]} pos=${v[3]} speed=${v[4]} ao=${v[5]} apts=${v[6]} cache=${_cacheBytes(v[7])} cspeed=${v[8]}');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }());
+    final env = Platform.environment;
+    final fastS = int.tryParse(env['JAVHUB_FAST_S'] ?? '') ?? 4;
+    final cycles = int.tryParse(env['JAVHUB_CYCLES'] ?? '') ?? 5;
+    trace('accel setup audio-buffer=${await _tools.getProperty('audio-buffer')} fast=${fastS}s cycles=$cycles');
+    await Future<void>.delayed(const Duration(seconds: 6));
+    for (var i = 0; i < cycles; i++) {
+      phase = 'fast$i';
+      trace('accel down $i');
+      await _tools.startAcceleration();
+      await Future<void>.delayed(Duration(seconds: fastS));
+      phase = 'normal$i';
+      trace('accel up $i');
+      await _tools.stopAcceleration();
+      await Future<void>.delayed(const Duration(seconds: 6));
+    }
+    // a quick tap: back at the speed it had, with sound
+    trace('accel tap');
+    unawaited(_tools.startAcceleration());
+    unawaited(_tools.stopAcceleration());
+    await Future<void>.delayed(const Duration(seconds: 1));
+    trace('accel after tap speed=${await _tools.getProperty('speed')} aid=${await _tools.getProperty('aid')}');
+    stop = true;
+    trace('accel done');
+    exit(0);
+  }
+
   Future<void> _start() async {
     await _tools.setProperty('network-timeout', '20');
     await _tools.setProperty('demuxer-max-bytes', '$_aheadBytes');
@@ -267,9 +328,19 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
     await _tools.setProperty('cache-pause-wait', '0.6');
     await _tools.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=5xx,reconnect_streamed=1,reconnect_delay_max=5');
     await _tools.setProperty('sub-auto', 'no');
+    if (_testAccel) await _tools.setProperty('loop-file', 'inf');
     if (isDesktop) {
+      // mpv times the picture by the sound, and on a speed change (holding the accelerate key)
+      // the sound already queued for the device counts at the new speed: the picture stalls
+      // ~2/3 of that queue on speeding up and drops ~2x it on coming back. mpv's 0.2 s queue
+      // made that a ~0.15 s stall and ~15 dropped frames; at 0.05 s it is <0.07 s and ~5.
+      // (No device underruns measured even at the device's own 22 ms with all cores busy.)
+      await _tools.setProperty('audio-buffer', '0.05');
       await _tools.setProperty('sub-font', Platform.isLinux ? 'Noto Sans CJK SC' : 'Microsoft YaHei');
       await _tools.setProperty('hwdec', 'auto-safe');
+    }
+    if (_testAccel && Platform.environment['JAVHUB_AB'] != null) {
+      await _tools.setProperty('audio-buffer', Platform.environment['JAVHUB_AB']!);
     }
 
     _subs.add(_player.stream.error.listen((e) {
@@ -324,6 +395,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
       return;
     }
     await _tools.init();
+    if (_testAccel) unawaited(_accelTest());
     _android?.autoSmallWindow = _tools.settings.smallWindow;
     if (start > 0) _tools.toast('从上次的 ${fmtClock(Duration(seconds: start))} 继续${from.isEmpty || from == _device ? '' : '（$from）'}');
     _resumeDone = true;
@@ -383,6 +455,7 @@ class _PlayerPageState extends State<PlayerPage> with WindowListener {
   /// Where to resume next time (also saved during playback: closing the window
   /// skips dispose()).
   Future<void> _savePosition() async {
+    if (_testAccel) return; // (a test build: the real app's settings file is not its to write)
     final pos = _lastPos.inSeconds;
     final duration = _player.state.duration.inSeconds;
     // (a player window leaves the settings file to the main window: two processes
